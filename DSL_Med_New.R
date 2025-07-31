@@ -891,7 +891,6 @@ plot(spat_data, col = "red", pch = 16)
 extent<-ext(spat_data)
 
 plot(extent)
-# writeVector(spat_data, "invasive_species.shp", overwrite = TRUE)
 
 # Data Aggregation (First Sighting per Species-Country) with proper ordering
 agg_data <- valid_coords %>%
@@ -916,7 +915,7 @@ calculate_momentum <- function(data) {
     group_by(ID) %>%
     mutate(
       t_step = row_number() - 1,  # t0, t1, t2...
-      t_flag = ifelse(t_step < 10, 1, 0)  # Limit to t0-t50
+      t_flag = ifelse(t_step < 11, 1, 0)  # Limit to t0-t50
     ) %>%
     filter(t_flag == 1) %>%
     ungroup()
@@ -933,7 +932,7 @@ country_order <- c("EG", "PS", "IL", "LB", "SY", "TR", "CY", "GR",
                    "AL", "ME", "HR", "LY", "IT", "MT", "TN", "DZ", "ES")
 
 # Define east-to-west ordering for MSFD regions
-msfd_order <- c("EMED", "ADRIA", "CMED", "WMED")
+msfd_order <- c("EMED","CMED","ADRIA","WMED")
 
 
 generate_heatmap <- function(data, group_var) {
@@ -969,15 +968,119 @@ generate_heatmap <- function(data, group_var) {
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
 }
 
+# First, join the MSFD information to your momentum data
+momentum_data <- momentum_data %>%
+  left_join(country_classification %>% select(country_id, msfd_id), 
+            by = "country_id") %>%
+  filter(!is.na(msfd_id))  # Remove any rows without MSFD classification
+
+# Now generate the MSFD heatmap
+msfd_heatmap <- generate_heatmap(momentum_data, "msfd_id") +
+  geom_tile(
+    color = "white",
+    lwd = 1.5,
+    linetype = 1
+  ) +
+  coord_fixed() +
+  scale_fill_gradient2(
+    low = "white",
+    mid = "snow1",
+    high = "black"
+  ) +
+  scale_y_continuous(
+    breaks = 0:10,
+    labels = c(expression(t[0]),
+               expression(t[1]),
+               expression(t[2]),
+               expression(t[3]),
+               expression(t[4]),
+               expression(t[5]),
+               expression(t[6]),
+               expression(t[7]),
+               expression(t[8]),
+               expression(t[9]),
+               expression(t[10]))
+  ) +
+  geom_text(aes(label = n), color = "white", size = 6) +
+  guides(
+    fill = guide_colourbar(
+      title = "NIS",
+      barwidth = 1,
+      barheight = 20
+    )
+  ) +
+  labs(
+    x = "MSFD Regions",
+    y = "Introductions (Momentum)"
+  ) +
+  theme_light() +
+  theme(
+    axis.text = element_text(size = 10, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 10, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+# Display the plot
+msfd_heatmap
+
+#Country
+country_heatmap <- generate_heatmap(momentum_data, "country_id") +
+  geom_tile(
+    color = "white",
+    lwd = 1.5,
+    linetype = 1
+  ) +
+  coord_fixed() +
+  scale_fill_gradient2(
+    low = "white",
+    mid = "snow1",
+    high = "black"
+  ) +
+  scale_y_continuous(
+    breaks = 0:10,
+    labels = c(expression(t[0]),
+               expression(t[1]),
+               expression(t[2]),
+               expression(t[3]),
+               expression(t[4]),
+               expression(t[5]),
+               expression(t[6]),
+               expression(t[7]),
+               expression(t[8]),
+               expression(t[9]),
+               expression(t[10]))
+  ) +
+  geom_text(aes(label = n), color = "white", size = 6) +
+  guides(
+    fill = guide_colourbar(
+      title = "NIS",
+      barwidth = 1,
+      barheight = 20
+    )
+  ) +
+  labs(
+    x = "MSFD Regions",
+    y = "Introductions (Momentum)"
+  ) +
+  theme_light() +
+  theme(
+    axis.text = element_text(size = 10, face = "bold"),
+    axis.title.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 10, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+#display
+country_heatmap
 
 # Generate and save heatmaps with east-to-west ordering
-ggsave("country_heatmap.png", 
-       generate_heatmap(momentum_data, "country_id"),
+ggsave("country_heatmap.jpg", 
+       country_heatmap,
        width = 10, height = 6)
 
-ggsave("msfd_heatmap.png", 
-       generate_heatmap(momentum_data %>% left_join(country_classification, by = "country_id"), 
-                        "msfd_id"),
+ggsave("msfd_heatmap.jpg", 
+       msfd_heatmap,
        width = 8, height = 6)
 
 
@@ -1006,9 +1109,71 @@ ecdf_plot <- ggplot(temporal_analysis, aes(x = delta_t, y = factor(t_step), fill
                lapply(1:9, function(i) bquote(Delta*"t"[.(i)])))
   ) +
   labs(x = "Time Difference (Years)", y = "Introduction Step") +
-  theme_ridges()+scale_x_continuous(limit=c(0,20))
+  theme_ridges()+scale_x_continuous(limit=c(0,40))
 
-ggsave("ecdf_analysis.png", ecdf_plot, width = 9, height = 7)
+
+#modified as in Vagenas 2024
+
+# ECDF Plot
+ecdf_plot <- ggplot(temporal_analysis, aes(x = delta_t, y = factor(t_step), fill = after_stat(ecdf))) +
+  stat_density_ridges(geom = "density_ridges_gradient", calc_ecdf = TRUE) +
+  scale_fill_viridis_c(name = "ECDF", option = "plasma") +
+  scale_y_discrete(
+    labels = c(expression(Delta*"t"["0-1"]),
+               lapply(1:9, function(i) bquote(Delta*"t"[.(i)])))
+  ) +
+  labs(x = "Time Difference (Years)", y = "Introduction Step") +
+  theme_ridges()+scale_x_continuous(limit=c(0,50))
+
+ecdf_plot
+
+# ECDF Plot with matching technical specs
+ecdf_plot <- ggplot(temporal_analysis, aes(x = delta_t, y = factor(t_step), 
+                                           fill = 0.5 - abs(0.5 - stat(ecdf)))) +
+  stat_density_ridges(
+    geom = "density_ridges_gradient",
+    calc_ecdf = TRUE,
+    quantile_lines = TRUE,
+    quantiles = 2,
+    color = "red",
+    linewidth = 0.7
+  ) +
+  scale_fill_viridis_c(
+    name = "Probability",
+    direction = -1,
+    option = "F"
+  ) +
+  scale_x_continuous(
+    breaks = seq(0, 50, 5),
+    limits = c(0, 50)
+  ) +
+  scale_y_discrete(
+    labels = c(expression(Delta*tau[1]-tau[0]),
+               expression(Delta*tau[2]-tau[1]),
+               expression(Delta*tau[3]-tau[2]),
+               expression(Delta*tau[4]-tau[3]),
+               expression(Delta*tau[5]-tau[4]),
+               expression(Delta*tau[6]-tau[5]),
+               expression(Delta*tau[7]-tau[6]),
+               expression(Delta*tau[8]-tau[7]),
+               expression(Delta*tau[9]-tau[8]),
+               expression(Delta*tau[10]-tau[9]))
+  ) +
+  labs(
+    x = "Years",
+    y = "Delta (Δ) of successive momenta"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.title = element_text(size = 15),
+    axis.text = element_text(size = 12),
+    axis.text.y = element_text(vjust = 0.5) # Ensures proper vertical alignment
+  )
+
+# Display the plot
+ecdf_plot
+
+ggsave("ecdf_analysis.jpg", ecdf_plot, width = 9, height = 7)
 
 # Cumulative Spread Analysis
 cumulative_spread_median <- temporal_analysis %>%
@@ -1036,34 +1201,6 @@ ggplot(cumulative_spread_mean, aes(x = t_step, y = cumulative_time)) +
        x = "Introduction Step", 
        y = "Cumulative Years") +
   theme_bw()
-
-
-
-# 1. Define the custom labels using Unicode subscripts
-custom_labels <- c(
-  "t₁₋₀", "t₂₋₁", "t₃₋₂", "t₄₋₃", "t₅₋₄",
-  "t₆₋₅", "t₇₋₆", "t₈₋₇", "t₉₋₈", "t₁₀₋₉"
-)
-
-
-# 2. Create the plot
-ggplot(cumulative_spread_median, aes(x = t_step, y = cumulative_time)) +
-  geom_line(color = "steelblue", size = 1.5) +
-  geom_point(size = 3) +
-  scale_x_continuous(
-    breaks = 1:10,  # Positions
-  ) +
-  labs(
-    title = "Cumulative Spread Timeline",
-    x = "Introduction Step", 
-    y = "Cumulative Years"
-  ) +
-  theme_bw()
-    
-# Save final dataset
-#write.csv(momentum_data, "processed_invasive_species_data.csv", row.names = FALSE)
-
-
 
 
 #ADD THE SPATIAL ASPECT
@@ -1284,7 +1421,7 @@ print(paste("Remaining NAs:", global(is.na(final_result), "sum")[1,1]))
 
 # Visual comparison
 
-plot(c(composite_max, filled),ext=extent, main = c("Original", "Interpolated"))
+plot(c(composite_mean, filled),ext=extent, main = c("Original", "Interpolated"))
 
 
 #mapview(filled)
@@ -1444,5 +1581,6 @@ ggplot() +
   ggtitle("Standardized Spread of NIS based on Uncertainty (Observation Points, N=14487)") +
   coord_equal() +  # Maintain aspect ratio
   theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5))  # Center title
+  theme(plot.title = element_text(hjust = 0.5))+  labs(x = "longitude",
+                                                       y = "latitude") # Center title
 
