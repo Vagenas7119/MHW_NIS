@@ -1,8 +1,3 @@
-###Decoding the spread of non-indigenous fishes in the Mediterranean Sea
-
-###For inquiries contact to @Vagenas G. 2024 (g.vagenas@hcmr.gr) | (georgvagenas@gmail.com)
-
-#Required_Libraries
 
 
 #NEW SET 2025 analysis
@@ -236,7 +231,7 @@ custom_labels <- c(
 
 
 # 2. Create the plot
-ggplot(cumulative_spread, aes(x = t_step, y = cumulative_time)) +
+ggplot(cumulative_spread_median, aes(x = t_step, y = cumulative_time)) +
   geom_line(color = "steelblue", size = 1.5) +
   geom_point(size = 3) +
   scale_x_continuous(
@@ -430,7 +425,7 @@ summary(stats$Mean)
 
 ##########
 
-plot(composite_mean)
+plot(composite_mean,ext=extent)
 
 #vamos aver max -- Inverse Distance Weighting (IDW)
 
@@ -462,7 +457,7 @@ filled <- interpolate(
 ) %>% 
   mask(nc_file_temp)  # Restrict to marine areas
 
-plot(filled)
+plot(filled,ext=extent)
 
 # 5. Combine with original (marine areas only)
 final_result <- cover(composite_mean, filled)
@@ -473,7 +468,7 @@ print(paste("Remaining NAs:", global(is.na(final_result), "sum")[1,1]))
 
 # Visual comparison
 
-plot(c(composite_max, filled), main = c("Original", "Interpolated"))
+plot(c(composite_max, filled),ext=extent, main = c("Original", "Interpolated"))
 
 
 #mapview(filled)
@@ -491,8 +486,8 @@ dist_raster <- distance(marine_mask, pts) %>%
 uncertainty <- 1/(dist_raster + 1)  # +1 avoids division by zero
 uncertainty <- uncertainty / global(uncertainty, max, na.rm = TRUE)[1,1]
 
-plot(uncertainty)
-plot(dist_raster)
+plot(uncertainty,ext=extent)
+plot(dist_raster,ext=extent)
 #
 
 
@@ -503,38 +498,22 @@ dist_raster <- mask(dist_raster, marine_mask)
 
 dist_raster_mask<-mask(dist_raster,filled)
 
-plot(dist_raster_mask)
+plot(dist_raster_mask,ext=extent)
+
 
 # 2. Scale distances to 0-1 range (1 = farthest/most uncertain)
 scaled_uncertainty <- dist_raster_mask / global(dist_raster_mask, max, na.rm = TRUE)[1,1]
 
 scaled_uncertainty
 
-plot(scaled_uncertainty)
+plot(scaled_uncertainty,ext=extent)
 
 
-plot(c(composite_max, filled,scaled_uncertainty), main = c("Original", "Interpolated","Uncertainty"))
+plot(c(composite_max, filled,scaled_uncertainty), main = c("Original", "Interpolated","Uncertainty"),ext=extent)
 
 
-
-mapview(filled)
-
-mapview(scaled_uncertainty)
-
-
-plot(filled$var1.pred,main=c("Interpolated"))
+plot(filled$var1.pred,main=c("Interpolated"),ext=extent)
 plot(momentum_data_geo,add=TRUE)
-
-
-# 5. Calculate summary statistics across all species
-mean_velocity <- mean(velocity_stack, na.rm = TRUE)
-max_velocity <- max(velocity_stack, na.rm = TRUE)
-sd_velocity <- stdev(velocity_stack, na.rm = TRUE)
-
-# 6. Visualize results
-plot(mean_velocity, main = "Mean Spread Velocity (km/year)")
-plot(max_velocity, main = "Maximum Spread Velocity (km/year)")
-plot(sd_velocity, main = "Standard Deviation of Spread Velocities")
 
 
 #PLOT EM
@@ -612,30 +591,42 @@ ggplot() +
   theme(plot.title = element_text(hjust = 0.5))  # Center title
 
 
-plot(composite_max)
+#I wanna standardize the values of the interpolated raster based on the uncertainty
 
-#resample at 10arcmin
+#how to do that? by multiplying :: high uncertainty will give same values, while low will give really high
+vel_df_inter <- as.data.frame(filled$var1.pred, xy = TRUE, na.rm = TRUE)
+vel_df_unc <- as.data.frame(scaled_uncertainty$lyr1, xy = TRUE, na.rm = TRUE)
 
-library(terra)
+stand_veloc<-vel_df_inter$var1.pred*(abs(vel_df_unc$lyr1-1))
+str(stand_veloc)
 
-# 1. Create target raster at 20 arc-minute resolution (0.166667 degrees)
-target_res <- 1/3  # 20 arc-minutes in degrees
-target_ext <- ext(-6.05, 36.2, 30.05, 45.8)  # Keep original extent
-target_crs <- "EPSG:4326"  # WGS84
 
-target_raster <- rast(
-  resolution = target_res,
-  extent = target_ext,
-  crs = target_crs
-)
+stand_veloc_geom<-data.frame(stand_veloc,vel_df$longitude,vel_df$latitude)
+str(stand_veloc_geom)
 
-# 2. Resample using nearest neighbor (for categorical/preserving values)
-filled_20min <- resample(
-  filled,
-  target_raster,
-  method = "near"  # Nearest neighbor
-)
+#standardize it
+library(scales)
+stand_veloc_geom$stand_veloc_01 <- rescale(stand_veloc_geom$stand_veloc, to = c(0, 1))
 
-# 3. Verify results
-print(filled_20min)  # Check new resolution
-plot(filled_20min[[1]], main = "20 arc-min resolution")
+# 2. Create the plot
+ggplot() +
+  # Velocity raster
+  geom_raster(data = stand_veloc_geom, 
+              aes(x = vel_df.longitude, y = vel_df.latitude, fill = stand_veloc_01)) +
+  
+  # Observation points
+  geom_point(data = pts_df, 
+             aes(x = longitude, y = latitude),
+             color = "red",fill="red", size = 0.5, shape = 21,stroke = 0.5) +  # Red X markers
+  
+  # Color scale
+  scale_fill_viridis_c(option = "plasma", 
+                       name = "Velocity (scaled)",
+                       na.value = NA) +
+  
+  # Titles and theme
+  ggtitle("Standardized Spread of NIS based on Uncertainty (Observation Points, N=14487)") +
+  coord_equal() +  # Maintain aspect ratio
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))  # Center title
+
