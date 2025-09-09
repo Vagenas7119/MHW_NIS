@@ -1,0 +1,8 @@
+---
+title: "clim_data_copernicus"
+author: "Shahar Chaikin"
+date: "2025-09-09"
+output: html_document
+---
+
+Here we will extract climatic data including SST and SBT based on the Copernicus Marine Service and the 'CopernicusDownloadR' R package
