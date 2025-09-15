@@ -1,0 +1,59 @@
+---
+title: "stage_1_wrangling_records_data"
+author: "Shahar Chaikin"
+date: "2025-09-12"
+output: html_document
+---
+
+libraries
+```{r}
+library(tidyverse)
+options(scipen = 999)
+```
+
+Records data
+```{r}
+records_lite=read.csv("C:\\Users\\User\\Desktop\\research\\Mentoring and colaborations\\Georgous\\MHW_NIS\\records_data.csv", fileEncoding = "latin1") %>% 
+  select(species,
+         year,
+         lat,
+         long) %>%
+  mutate(year = if_else(trimws(year) == "" | str_detect(year, "[<>]") | str_detect(year, "\\?\\?\\?"),
+                         NA_character_, year),
+         lat = if_else(trimws(lat) == ""| str_detect(lat, "[<>]") | str_detect(lat, "\\?\\?\\?"), NA_character_, lat),
+         long = if_else(trimws(long) == ""| str_detect(long, "[<>]") | str_detect(long, "\\?\\?\\?"), NA_character_, long)) %>% 
+  filter(!year%in%"date??",
+         !lat%in%" 34.184593            5")
+
+records_lite$lat=as.numeric(records_lite$lat)
+records_lite$long=as.numeric(records_lite$long)
+records_lite$year=as.numeric(records_lite$year)
+
+records_lite=records_lite %>% #fix wrong inserted years
+  mutate(year=case_when(year==2029~2020,
+                        year==20161~2016,
+                        TRUE~year)) %>% 
+  filter(!lat==long,#fix wrong coords when lat equals long
+         !lat<30.26,#only the Med. borders
+         !lat>45.78,
+         !long>36.22,
+         !long<(-6.03),
+         year>1987#for the daily SST laryer med-cmcc-tem-rean-d from "Mediterranean Sea - High Resolution Diurnal Subskin Sea Surface Temperature Analysis. E.U. Copernicus Marine Service Information (CMEMS). Marine Data Store (MDS). DOI: 10.48670/moi-00170 (Accessed on 04 Jul 2023)"
+         ) %>% 
+  drop_na()
+
+
+write.csv(records_lite,"records_cleaned.csv",row.names = F)
+```
+
+Extrat the h3 IDs of which climatic data is needed
+```{r}
+coords=records_lite %>% 
+  distinct(species,lat,long) %>% 
+  mutate(h3_id = h3::geo_to_h3(c(lat,long), res = 3)) %>% 
+  distinct(h3_id)
+
+#export h3_ids
+write.csv(coords,"coords_for_clim_extr.csv",row.names = F)
+```
+

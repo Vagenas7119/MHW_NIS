@@ -1,0 +1,36 @@
+---
+title: "stage_2_extract_sst"
+author: "Shahar Chaikin"
+date: "2025-09-12"
+output: html_document
+---
+
+libraries
+```{r}
+library(CopernicusMarine)
+```
+
+Download a subset
+```{r}
+
+cms_products_list() %>% view
+MMP64_details=cms_product_details(product = "MEDSEA_MULTIYEAR_PHY_006_004")
+MMP64_details$properties
+MMP64_details$description
+MMP64_details$properties$mainVariables
+
+my_data <-
+  cms_download_subset(username = "schaikin",
+                      password = "Aa123456",
+    product       = "MEDSEA_MULTIYEAR_PHY_006_004",
+    layer         = "med-cmcc-tem-rean-d",
+    variable      = c("thetao"),
+    region        = c(30, 32, 30.5, 32.5),
+    timerange     = c("2021-01-01", "2021-01-02"),
+    #verticalrange = c(0),
+    progress      = T
+)
+
+plot(my_data["vo"], col = hcl.colors(100), axes = TRUE)
+```
+
