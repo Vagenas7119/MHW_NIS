@@ -160,11 +160,323 @@ for (chunk in h3_chunks) {
 }
 ```
 
-Test the results
 ```{r}
-test=read_rds("copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004/832db0fffffffff.rds")
+test=read_rds("copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004/831e82fffffffff.rds") %>% drop_na()
 
-ggplot(test)+
-  geom_hex(aes(x=date,y=as.numeric(sst)))
+test_mean=test %>% 
+  group_by(date) %>% 
+  summarise(mean_sst=mean(sst)) 
+  
+
+ggplot(test_mean)+
+  geom_point(aes(x=date,y=mean_sst))
+```
+
+Clean coords outside the hex borders
+Loop it
+```{r}
+# 1. Define the input and output directories
+input_dir <- "copernicus_data_by_hexagon\\MEDSEA_MULTIYEAR_PHY_006_004"
+output_dir <- "C:\\Users\\User\\Desktop\\research\\Mentoring and colaborations\\Georgous\\MHW_NIS\\copernicus_data_by_hexagon\\MEDSEA_MULTIYEAR_PHY_006_004\\corrected_hex_level_data\\"
+
+# Ensure the output directory exists
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir, recursive = TRUE)
+}
+
+# 2. Get a list of all .rds files
+file_list <- list.files(
+  path = input_dir,
+  pattern = "\\.rds$",
+  full.names = TRUE
+)
+
+# 3. Loop through each file
+for (file_path in file_list) {
+  
+  file_name <- tools::file_path_sans_ext(basename(file_path))
+  output_file_path <- file.path(output_dir, paste0(file_name, "_cleaned.rds"))
+  
+  # Skip if a cleaned version already exists
+  if (file.exists(output_file_path)) {
+    message(paste("Skipping", file_name, "- cleaned version already exists."))
+    next
+  }
+  
+  message(paste("Processing file:", file_name))
+  
+  # Read the raw data
+  raw_data <- read_rds(file_path)
+  
+  # Drop NA values
+  cleaned_data_initial <- raw_data %>%
+    drop_na()
+  
+  # Check if the data frame is empty after dropping NAs
+  if (nrow(cleaned_data_initial) == 0) {
+    message(paste("Skipping", file_name, "- no valid rows after removing NAs."))
+    next # Skip to the next file in the loop
+  }
+  
+  # If the data frame is not empty, proceed with the cleaning
+  coords_to_keep <- cleaned_data_initial %>%
+    distinct(h3_id, lat, long) %>%
+    mutate(
+      expo_h3 = h3jsr::point_to_cell(
+        input = sf::st_as_sf(., coords = c("long", "lat"), crs = 4326),
+        res = 3
+      )
+    ) %>%
+    filter(h3_id == expo_h3)
+  
+  # Use semi_join for accurate filtering
+  cleaned_data_final <- raw_data %>%
+    semi_join(coords_to_keep, by = c("lat", "long"))
+  
+  # Save the final cleaned data
+  saveRDS(cleaned_data_final, output_file_path)
+  
+  message(paste("Saved cleaned data to:", output_file_path))
+}
+
+message("All files have been processed.")
+```
+
+which files are not written?
+```{r}
+# Get a list of the base filenames (without path or extension)
+original_files <- tools::file_path_sans_ext(basename(list.files(input_dir, pattern = "\\.rds$")))
+processed_files <- tools::file_path_sans_ext(basename(list.files(output_dir, pattern = "_cleaned\\.rds$")))
+
+# Remove the "_cleaned" suffix from the processed filenames
+processed_files <- gsub("_cleaned", "", processed_files)
+
+# Find which original files are not in the processed list
+unprocessed_files <- setdiff(original_files, processed_files)
+
+# Print the list of unprocessed files
+if (length(unprocessed_files) > 0) {
+  cat("The following files were not processed:\n")
+  print(unprocessed_files)
+} else {
+  cat("All files were processed successfully.\n")
+}
+#The following files were not processed:
+#[1] "831ec8fffffffff" "831ec9fffffffff" "832d05fffffffff"
+# These are the black and Marmara Sea
+```
+
+Plot data and trends by hexagons
+h3 with geom_hex
+```{r}
+# 1. Define the input and output directories
+input_dir <- "C:\\Users\\User\\Desktop\\research\\Mentoring and colaborations\\Georgous\\MHW_NIS\\copernicus_data_by_hexagon\\MEDSEA_MULTIYEAR_PHY_006_004\\corrected_hex_level_data\\"
+output_dir <- "C:\\Users\\User\\Desktop\\research\\Mentoring and colaborations\\Georgous\\MHW_NIS\\copernicus_data_by_hexagon\\MEDSEA_MULTIYEAR_PHY_006_004\\corrected_hex_level_data\\h3_hex_plots\\"
+
+# Ensure the output directory exists
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir, recursive = TRUE)
+}
+
+# 2. Get a list of all .rds files
+file_list <- list.files(
+  path = input_dir,
+  pattern = "\\.rds$",
+  full.names = TRUE
+)
+
+# 3. Loop through each file
+for (file_path in file_list) {
+  
+  # a. Extract the filename to use for the plot title and saved file name
+  hex_name <- tools::file_path_sans_ext(basename(file_path))
+  
+  # b. Read the data from the current file
+  data <- read_rds(file_path)
+  
+  # c. Check if the data frame has any rows before plotting
+  if (nrow(data) == 0) {
+    message(paste("Skipping", hex_name, "- data frame is empty."))
+    next
+  }
+  
+  # d. Create the ggplot object
+  p <- ggplot(data = data, aes(x = long, y = lat)) +
+    geom_hex() +
+    scale_fill_viridis_c(name = "Count") + # Use a color scale for density
+    labs(
+      title = paste("Data Density for H3 Hexagon:", hex_name),
+      x = "Longitude",
+      y = "Latitude"
+    ) +
+    theme_minimal() + # Use a clean theme
+    coord_fixed() # Ensures the aspect ratio is correct for geographical coordinates
+  
+  # e. Define the output file name and path
+  output_file_name <- paste0(hex_name, ".png")
+  output_file_path <- file.path(output_dir, output_file_name)
+  
+  # f. Save the plot
+  ggsave(
+    filename = output_file_path,
+    plot = p,
+    width = 7,
+    height = 5,
+    units = "in",
+    dpi = 300
+  )
+  
+  message(paste("Saved plot for", hex_name, "to", output_file_path))
+}
+
+  message("All plots have been generated and saved.")
+```
+
+mean sst plots - averaging sst at the hex level and exporting
+```{r}
+# 1. Define the input and output directories
+input_dir <- "C:\\Users\\User\\Desktop\\research\\Mentoring and colaborations\\Georgous\\MHW_NIS\\copernicus_data_by_hexagon\\MEDSEA_MULTIYEAR_PHY_006_004\\corrected_hex_level_data\\"
+output_dir <- "C:\\Users\\User\\Desktop\\research\\Mentoring and colaborations\\Georgous\\MHW_NIS\\copernicus_data_by_hexagon\\MEDSEA_MULTIYEAR_PHY_006_004\\corrected_hex_level_data\\sst_trends\\"
+
+# Ensure the output directory exists
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir, recursive = TRUE)
+}
+
+# 2. Get a list of all .rds files
+file_list <- list.files(
+  path = input_dir,
+  pattern = "\\.rds$",
+  full.names = TRUE
+)
+
+# 3. Loop through each file
+for (file_path in file_list) {
+
+  # a. Extract the filename to use for the title and file name
+  hex_name <- tools::file_path_sans_ext(basename(file_path))
+
+ # Read the data from the current file
+data <- read_rds(file_path)
+
+# Check if the data frame is empty
+if (nrow(data) == 0) {
+  message(paste("Skipping", hex_name, "- data frame is empty."))
+  next
+}
+
+# Ensure the date column is in the correct format using lubridate
+# It is assumed the date column is named 'date' and is in YYYY-MM-DD format.
+# Adjust the function (e.g., dmy, mdy) if your date format is different.
+data <- data %>%
+  mutate(date = lubridate::ymd(date))
+
+# Group by date and summarize the mean sst
+mean_sst_df <- data %>%
+  group_by(date) %>%
+  summarise(mean_sst = mean(sst, na.rm = TRUE)) %>%
+  ungroup()
+
+  # e. Create the ggplot object for the trend plot
+  p <- ggplot(data = mean_sst_df, aes(x = date, y = mean_sst)) +
+    geom_point(alpha = 0.5) + # Add points with some transparency
+    scale_x_date(date_breaks = "4 years", date_labels = "%Y") + # Set x-axis breaks to 4-year intervals
+    labs(
+      title = paste("SST Trend for H3 Hexagon:", hex_name),
+      x = "Date",
+      y = "Mean Sea Surface Temperature (°C)"
+    ) +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Rotate x-axis labels for readability
+
+  # f. Define the output file name and path
+  output_file_name <- paste0(hex_name, "_sst_trend.png")
+  output_file_path <- file.path(output_dir, output_file_name)
+
+  # g. Save the plot
+  ggsave(
+    filename = output_file_path,
+    plot = p,
+    width = 9,
+    height = 6,
+    units = "in",
+    dpi = 300
+  )
+
+  message(paste("Saved SST trend plot for", hex_name, "to", output_file_path))
+}
+
+message("All SST trend plots have been generated and saved.")
+```
+
+Conclusions
+Some regions should be reconsidered as the hexagons border with two sub seas.
+e.g.,:
+831e8afffffffff
+831e8bfffffffff
+831e12fffffffff
+
+
+Bind all sst data into one rds file having all hexagons and a mean daily sst across the entire hexagon
+```{r}
+library(dplyr)
+library(readr)
+library(purrr)
+
+# 1. Define the input directory containing all the individual hexagon RDS files
+input_dir <- "C:\\Users\\User\\Desktop\\research\\Mentoring and colaborations\\Georgous\\MHW_NIS\\copernicus_data_by_hexagon\\MEDSEA_MULTIYEAR_PHY_006_004\\corrected_hex_level_data\\"
+output_dir <- "C:\\Users\\User\\Desktop\\research\\Mentoring and colaborations\\Georgous\\MHW_NIS\\copernicus_data_by_hexagon\\MEDSEA_MULTIYEAR_PHY_006_004\\corrected_hex_level_data\\final_data\\"
+
+# Ensure the output directory exists
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir, recursive = TRUE)
+}
+
+# 2. Get a list of all .rds files
+file_list <- list.files(
+  path = input_dir,
+  pattern = "\\.rds$",
+  full.names = TRUE
+)
+
+# 3. Create a function to process each file
+process_file <- function(file_path) {
+  # Read the data
+  data <- read_rds(file_path)
+  
+  # Check if the data frame is empty
+  if (nrow(data) == 0) {
+    return(NULL) # Return NULL for empty files
+  }
+  
+  # Extract the h3_id from the filename
+  h3_id_from_name <- tools::file_path_sans_ext(basename(file_path))
+  
+  # Ensure the date column is in the correct format
+  data <- data %>%
+    mutate(date = lubridate::ymd(date))
+  
+  # Group by date and summarize the mean and median sst
+  summary_data <- data %>%
+    group_by(date) %>%
+    summarise(
+      mean_sst = mean(sst, na.rm = TRUE),
+      median_sst = median(sst, na.rm = TRUE)
+    ) %>%
+    ungroup() %>%
+    mutate(h3_id = h3_id_from_name) # Add the h3_id as a new column
+  
+  return(summary_data)
+}
+
+# 4. Use purrr::map_dfr to apply the function to all files and bind the results
+all_hex_data <- purrr::map_dfr(file_list, process_file)
+
+# 5. Save the combined data frame to a single RDS file
+output_file_path <- file.path(output_dir, "all_hexagons_daily_summary.rds")
+saveRDS(all_hex_data, output_file_path)
+
+message("Combined data for all hexagons has been saved to:")
+message(output_file_path)
 ```
 
