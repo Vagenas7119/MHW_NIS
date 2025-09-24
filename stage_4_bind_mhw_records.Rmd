@@ -1,0 +1,145 @@
+---
+title: "stage_4_bind_mhw_records"
+author: "Shahar Chaikin"
+date: "2025-09-24"
+output: html_document
+---
+
+Bind climatologies with records data
+
+Libraries
+```{r}
+library(tidyverse)
+```
+
+data
+```{r}
+clim=read_rds("climatology_df_median_sst_10m.rds")
+events=read_rds("event_df_median_sst_10m.rds")
+```
+
+
+Estimate annual cumulative intensity per hexagon
+```{r}
+annual_c_int=clim %>% 
+  drop_na(median_sst_10m) %>% 
+  mutate(
+    # Create a new column, e.g., 'temp_anomaly'
+    intensity = dplyr::if_else(
+      !is.na(event_no), # The condition: is event_no not NA?
+      median_sst_10m - seas, # What to do if the condition is TRUE
+      0 # What to do if the condition is FALSE
+    )) %>% 
+    mutate(year_of_mhws=lubridate::year(date)) %>% 
+  group_by(h3_id,year_of_mhws) %>% 
+  summarise(annual_c_int=sum(intensity)) %>% 
+  mutate(year_of_records=year_of_mhws+1)
+```
+
+Add records data
+```{r}
+records=read_csv("records_cleaned.csv") %>% 
+  mutate(
+    h3_id = h3jsr::point_to_cell(
+      input = sf::st_as_sf(., coords = c("long", "lat"), crs = 4326),
+      res = 3)) %>% 
+  #remove marmara and black sea records that are not in the climatic model
+  filter(!h3_id%in%c("831ec8fffffffff", "831ec9fffffffff", "832d05fffffffff"))
+
+#How many records per year and hexagon? - pooled species
+record_count=records %>% 
+  group_by(h3_id,year) %>% 
+  summarise(records=n()) %>% 
+  rename(year_of_records=year)
+```
+
+Plot coords
+```{r}
+# Assuming your dataframe is named 'records'
+# Ensure 'lat' and 'long' columns exist in 'records'
+
+# 1. Get world map data
+world_map <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+
+# 2. Convert your 'records' data frame to an sf object
+records_sf <- records %>%
+  drop_na(lat, long) %>% # Remove rows with missing lat/long
+  sf::st_as_sf(coords = c("long", "lat"), crs = 4326) # CRS 4326 is WGS84 for lat/long
+
+# 3. Calculate the extent of your coordinates
+bbox <- sf::st_bbox(records_sf)
+
+# 4. Create the ggplot
+ggplot() +
+  # Add the world map
+  geom_sf(data = world_map, fill = "lightgrey", color = "darkgrey") +
+  # Add your data points
+  geom_sf(data = records_sf, size = 1, alpha = 0.7) +
+  # Crop the map to the extent of your points
+  coord_sf(
+    xlim = c(bbox["xmin"] - 1, bbox["xmax"] + 1), # Adjust buffer as needed
+    ylim = c(bbox["ymin"] - 1, bbox["ymax"] + 1), # Adjust buffer as needed
+    expand = FALSE # Prevents adding extra space around the crop
+  ) +
+  # Add labels and theme
+  labs(
+    title = "Species records",
+    x = "Longitude",
+    y = "Latitude",
+    color = "Species" # Legend title for species color
+  ) +
+  theme_minimal()+
+  guides(color=F)
+```
+
+Bind climatic and records data
+```{r}
+c_int_records=annual_c_int %>% 
+  left_join(record_count,
+            by=c("h3_id","year_of_records")) %>% 
+  mutate(records = replace_na(records, 0))
+#write.csv(c_int_records,"c_int_records.csv",row.names = F)
+```
+
+Explore
+```{r}
+ggplot(c_int_records)+
+  geom_point(aes(x=year_of_records,y=records))
+
+ggplot(c_int_records)+
+  geom_point(aes(x=annual_c_int,y=records))
+```
+
+```{r}
+library(glmmTMB)
+#poisson
+test=glmmTMB(data = c_int_records,formula = records~annual_c_int+(1|h3_id),family = "poisson")
+summary(test)
+sjPlot::plot_model(test,type="eff",terms="annual_c_int",show.data = T)
+plot(DHARMa::simulateResiduals(test))
+MuMIn::r.squaredGLMM(test)
+
+#nbinom2
+test2=glmmTMB(data = c_int_records,formula = records~annual_c_int+(1|h3_id),family = "nbinom2")
+summary(test2)
+sjPlot::plot_model(test2,type="eff",terms="annual_c_int",show.data = F)+
+  theme_bw()
+plot(DHARMa::simulateResiduals(test2))
+MuMIn::r.squaredGLMM(test2)
+
+#nbinom
+test3=glmmTMB(data = c_int_records,formula = records~annual_c_int+(1|h3_id),family = "nbinom1")
+summary(test3)
+sjPlot::plot_model(test3,type="eff",terms="annual_c_int",show.data = F)
+plot(DHARMa::simulateResiduals(test3))
+MuMIn::r.squaredGLMM(test3)
+
+#tweedie
+test4=glmmTMB(data = c_int_records,formula = records~annual_c_int+(1|h3_id),family = "tweedie")
+summary(test4)
+sjPlot::plot_model(test4,type="eff",terms="annual_c_int",show.data = F)
+plot(DHARMa::simulateResiduals(test4))
+MuMIn::r.squaredGLMM(test4)
+
+```
+
