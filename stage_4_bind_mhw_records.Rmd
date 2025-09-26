@@ -14,11 +14,15 @@ library(tidyverse)
 
 data
 ```{r}
+#trended
 clim=read_rds("climatology_df_median_sst_10m.rds")
 events=read_rds("event_df_median_sst_10m.rds")
+#detrended
+clim=read_rds("climatology_dt_df.rds")
+events=read_rds("event_dt_df.rds")
 ```
 
-
+#1.1) annual cumulative intensity
 Estimate annual cumulative intensity per hexagon
 ```{r}
 annual_c_int=clim %>% 
@@ -36,6 +40,7 @@ annual_c_int=clim %>%
   mutate(year_of_records=year_of_mhws+1)
 ```
 
+#1.2) Records data
 Add records data
 ```{r}
 records=read_csv("records_cleaned.csv") %>% 
@@ -53,6 +58,7 @@ record_count=records %>%
   rename(year_of_records=year)
 ```
 
+##1.2.1) Plot records
 Plot coords
 ```{r}
 # Assuming your dataframe is named 'records'
@@ -92,7 +98,8 @@ ggplot() +
   guides(color=F)
 ```
 
-Bind climatic and records data
+#1.3) Bind MHWs and records
+Bind MHWs with the records of the succeeding year
 ```{r}
 c_int_records=annual_c_int %>% 
   left_join(record_count,
@@ -103,13 +110,18 @@ c_int_records=annual_c_int %>%
 
 Explore
 ```{r}
+c_int_records=read.csv("c_int_records.csv")
 ggplot(c_int_records)+
   geom_point(aes(x=year_of_records,y=records))
 
 ggplot(c_int_records)+
   geom_point(aes(x=annual_c_int,y=records))
+
+ggplot(c_int_records)+
+  geom_point(aes(x=year_of_records,y=annual_c_int))
 ```
 
+#1.4) GLMMs
 ```{r}
 library(glmmTMB)
 #poisson
@@ -140,6 +152,79 @@ summary(test4)
 sjPlot::plot_model(test4,type="eff",terms="annual_c_int",show.data = F)
 plot(DHARMa::simulateResiduals(test4))
 MuMIn::r.squaredGLMM(test4)
-
 ```
 
+#2.1) detrended cumulative intensity
+Estimate annual cumulative intensity per hexagon
+```{r}
+annual_c_int_dt=climatology_dt_df %>% 
+  drop_na(residuals) %>% 
+  mutate(
+    # Create a new column, e.g., 'intensity'
+    intensity = dplyr::if_else(
+      !is.na(event_no), # The condition: is event_no not NA?
+      residuals - seas, # What to do if the condition is TRUE
+      0 # What to do if the condition is FALSE
+    )) %>% 
+    mutate(year_of_mhws=lubridate::year(date)) %>% 
+  group_by(h3_id,year_of_mhws) %>% 
+  summarise(annual_c_int=sum(intensity)) %>% 
+  mutate(year_of_records=year_of_mhws+1)
+```
+
+#2.2) Bind MHWs and records
+Bind MHWs with the records of the succeeding year
+```{r}
+c_int_records_dt=annual_c_int_dt %>% 
+  left_join(record_count,
+            by=c("h3_id","year_of_records")) %>% 
+  mutate(records = replace_na(records, 0))
+#write.csv(c_int_records_dt,"c_int_records_dt.csv",row.names = F)
+```
+
+Explore
+```{r}
+c_int_records_dt=read.csv("c_int_records_dt.csv")
+ggplot(c_int_records_dt)+
+  geom_point(aes(x=year_of_records,y=records))
+
+ggplot(c_int_records_dt)+
+  geom_point(aes(x=annual_c_int,y=records))
+
+ggplot(c_int_records_dt)+
+  geom_point(aes(x=year_of_records,y=annual_c_int))
+```
+
+#1.4) GLMMs
+```{r}
+library(glmmTMB)
+#poisson
+test_dt=glmmTMB(data = c_int_records_dt,formula = records~annual_c_int+(1|h3_id),family = "poisson")
+summary(test_dt)
+sjPlot::plot_model(test_dt,type="eff",terms="annual_c_int",show.data = T)
+plot(DHARMa::simulateResiduals(test_dt))
+MuMIn::r.squaredGLMM(test_dt)
+
+#nbinom2
+test2_dt=glmmTMB(data = c_int_records_dt,formula = records~annual_c_int+(1|h3_id),family = "nbinom2")
+summary(test2_dt)
+sjPlot::plot_model(test2_dt,type="eff",terms="annual_c_int",show.data = F)+
+  theme_bw()
+plot(DHARMa::simulateResiduals(test2_dt))
+MuMIn::r.squaredGLMM(test2_dt)
+
+#nbinom
+test3_dt=glmmTMB(data = c_int_records_dt,formula = records~annual_c_int+(1|h3_id),family = "nbinom1")
+summary(test3_dt)
+sjPlot::plot_model(test3_dt,type="eff",terms="annual_c_int",show.data = F)
+plot(DHARMa::simulateResiduals(test3_dt))
+MuMIn::r.squaredGLMM(test3_dt)
+
+#tweedie
+test4_dt=glmmTMB(data = c_int_records_dt,formula = records~annual_c_int+(1|h3_id),family = "tweedie")
+summary(test4_dt)
+sjPlot::plot_model(test4_dt,type="eff",terms="annual_c_int",show.data = F)
+plot(DHARMa::simulateResiduals(test4_dt))
+MuMIn::r.squaredGLMM(test4_dt)
+
+```

@@ -76,7 +76,7 @@ ts2clm_df$h3_id %>% unique %>% length
 write_rds(ts2clm_df,"ts2clm_df_median_sst_10m.rds")
 ```
 
-###2.1.2) Estimate MHWs for all hexagons
+###1.1.2) Estimate MHWs for all hexagons
 ```{r}
 # Create empty lists to store climatology and event dataframes
 climatology_list <- list()
@@ -224,3 +224,159 @@ for (i in h3_vector) {
          path = "C:\\Users\\User\\Desktop\\research\\Mentoring and colaborations\\Georgous\\MHW_NIS\\copernicus_data_by_hexagon\\MEDSEA_MULTIYEAR_PHY_006_004_10m\\corrected_hex_level_data\\mhw_plots\\median/",device = "jpeg",width = 35,height = 15,units = "cm")
 }
 ```
+
+###1.2) detrended MHWs
+Test
+```{r eval=FALSE, include=FALSE}
+test=sst_data %>% 
+         filter(h3_id%in%"831e12fffffffff")
+
+test_lm=lm(data=test,formula = median_sst_10m~date)
+
+detrend_data=bind_cols(test$date,
+                       test$median_sst_10m,
+                       test_lm$fitted.values,
+                       test_lm_res=test_lm$residuals) %>% 
+  rename(date=1,
+         obs=2,
+         fitted=3,
+         residuals=4)
+#observed data
+ggplot() + 
+  geom_point(data=test,
+             aes(x=date,y=median_sst_10m))+
+  geom_line(data=detrend_data,
+            aes(x=date,y=fitted))
+#plot detrended data
+ggplot() + 
+  geom_point(data=detrend_data,
+             aes(x=date,y=residuals))
+```
+
+Applay to all
+```{r}
+# Get unique hexagon IDs
+hexagons <- unique(sst_data$h3_id)
+
+# Initialize an empty list to store the results for each hexagon
+sst_data_detrended_list <- list()
+
+# Loop through each hexagon
+for (hex in hexagons) {
+  # Filter data for the current hexagon
+  test <- sst_data %>%
+    filter(h3_id %in% hex)
+
+  # Fit the linear model
+  test_lm <- lm(data = test, formula = median_sst_10m ~ date)
+
+  # Create the detrended data frame
+  detrend_data <- bind_cols(test$date,
+                            test$median_sst_10m,
+                            test_lm$fitted.values,
+                            test_lm$residuals) %>%
+    rename(date = 1,
+           obs = 2,
+           fitted = 3,
+           residuals = 4) %>%
+    mutate(h3_id = hex) # Add the hexagon ID to the results
+
+  # Store the results in the list
+  sst_data_detrended_list[[hex]] <- detrend_data #Use hex as name for the list
+  
+  print(paste("Finished processing hexagon", hex)) #Optional: Print progress
+}
+
+# Bind all results into a single data frame
+sst_data_detrended <- bind_rows(sst_data_detrended_list)
+```
+
+###1.2.2) Estimate Climatologies
+```{r}
+test_climatology_dt = heatwaveR::ts2clm(
+  data = sst_data_detrended %>% 
+    filter(h3_id %in% "830004fffffffff"),
+  x = date,
+  y = residuals,
+  c("1993-01-01", "2021-06-30"),
+  windowHalfWidth = 5,
+  pctile = 95,
+  smoothPercentile = T,
+  clmOnly = F,
+  var = F,
+  roundClm = 4) %>% 
+  mutate(hexagon="830004fffffffff")
+
+h3_vector=sst_data_detrended$h3_id %>% unique
+
+#Estimate climatologies for all hexagons using for loop
+ts2clm_det_list=list()
+#List of h3_ids
+for (i in h3_vector) {
+  # Filter the data for the current h3_id
+  current_data <- sst_data_detrended %>% 
+    filter(h3_id == i)
+
+  # Get the minimum and maximum dates from the filtered data
+  start_date <- min(current_data$date)
+  end_date <- max(current_data$date)
+  
+  # Estimate the climatology using the dynamic date range
+ ts2clm_det_list[[i]]=heatwaveR::ts2clm(
+  data = sst_data_detrended %>% 
+    filter(h3_id %in% i),
+  x = date,
+  y = residuals,
+  climatologyPeriod=c(start_date, end_date),
+  windowHalfWidth = 15,
+  pctile = 95,
+  smoothPercentile = T,
+  clmOnly = F,
+  var = F,
+  roundClm = 4) %>% 
+  mutate(h3_id=i)
+}
+
+ts2clm_det_df=bind_rows(ts2clm_det_list)
+ts2clm_det_df$h3_id %>% unique %>% length
+write_rds(ts2clm_det_df,"ts2clm_dt_df_median_sst_10m.rds")
+```
+
+###1.2.3) Estimate MHWs for all hexagons
+```{r}
+# Create empty lists to store climatology and event dataframes
+climatology_dt_list <- list()
+event_dt_list <- list()
+
+# Loop through each unique hexagon
+for (i in unique(ts2clm_det_df$h3_id)) {
+  
+  # Filter data for the current hexagon
+  hex_data <- ts2clm_det_df %>% 
+    filter(h3_id %in% i)
+  
+  # Calculate heatwave events using detect_event function
+  mhw_result <- detect_event(
+    data = hex_data, 
+    x = date, 
+    y = residuals
+  )
+  
+  # Extract and store climatology and event dataframes
+  climatology_dt_list[[i]] <- mhw_result$climatology
+  event_dt_list[[i]] <- mhw_result$event
+}
+
+# Combine climatology dataframes into a single dataframe
+climatology_dt_df <- bind_rows(climatology_dt_list, .id = "h3_id")
+
+# Combine event dataframes into a single dataframe
+event_dt_df <- bind_rows(event_dt_list, .id = "h3_id")
+```
+
+Write detect_event output
+```{r eval=FALSE, include=FALSE}
+write_rds(climatology_dt_df,"climatology_dt_df.rds")
+write_rds(event_dt_df,"event_dt_df.rds")
+```
+
