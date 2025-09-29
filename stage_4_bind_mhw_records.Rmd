@@ -18,8 +18,8 @@ data
 clim=read_rds("climatology_df_median_sst_10m.rds")
 events=read_rds("event_df_median_sst_10m.rds")
 #detrended
-clim=read_rds("climatology_dt_df.rds")
-events=read_rds("event_dt_df.rds")
+clim_dt=read_rds("climatology_dt_df.rds")
+events_dt=read_rds("event_dt_df.rds")
 ```
 
 #1.1) annual cumulative intensity
@@ -157,7 +157,7 @@ MuMIn::r.squaredGLMM(test4)
 #2.1) detrended cumulative intensity
 Estimate annual cumulative intensity per hexagon
 ```{r}
-annual_c_int_dt=climatology_dt_df %>% 
+annual_c_int_dt=clim_dt %>% 
   drop_na(residuals) %>% 
   mutate(
     # Create a new column, e.g., 'intensity'
@@ -226,5 +226,4 @@ summary(test4_dt)
 sjPlot::plot_model(test4_dt,type="eff",terms="annual_c_int",show.data = F)
 plot(DHARMa::simulateResiduals(test4_dt))
 MuMIn::r.squaredGLMM(test4_dt)
-
 ```
