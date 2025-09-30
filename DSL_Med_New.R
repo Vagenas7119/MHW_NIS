@@ -1412,6 +1412,7 @@ filled <- interpolate(
 
 plot(filled,ext=extent)
 
+
 # 5. Combine with original (marine areas only)
 final_result <- cover(composite_mean, filled)
 
