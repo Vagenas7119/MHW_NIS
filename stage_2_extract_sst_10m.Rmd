@@ -235,6 +235,28 @@ for (file_path in file_list) {
 message("All files have been processed.")
 ```
 
+Adding unique cell-level IDs
+```{r}
+test=read_rds("copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m/831e12fffffffff.rds")  %>%
+     # Unite the 'lat' and 'long' columns into a new column named 'cell_id'
+     # The values are separated by an underscore for clarity.
+     unite(
+         col = "cell_id",
+         lat,
+         long,
+         sep = "_",
+         remove = FALSE  # Set to TRUE if you want to remove the original lat/long columns
+     )
+
+#How many dial temp data I have per month?
+test_dial_data=test %>% 
+  mutate(month=lubridate::month(date),
+         year=lubridate::year(date)) %>% 
+  group_by(cell_id,year,month) %>% 
+    summarise(n=n())
+```
+
+
 which files are not written?
 ```{r}
 # Get a list of the base filenames (without path or extension)
