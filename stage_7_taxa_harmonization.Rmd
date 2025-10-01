@@ -42,6 +42,7 @@ Harmonization_fix=Harmonization %>%
     scientificName=case_when(
       original_search%in%"Trigloporus lastoviza"~"Chelidonichthys lastoviza",
       original_search%in%"Spicara flexuosa"~"Spicara flexuosum",
+      original_search%in%"Saurida undosquamis"~"Saurida lessepsianus",
       TRUE~scientificName)) %>% 
   select(species=original_search,
          corrected=scientificName) %>% 
@@ -83,5 +84,34 @@ Harmonization_nis_fix=Harmonization_nis %>%
          corrected=scientificName) %>% 
   mutate(is_cahnged=Species_updated_name_fishbase==corrected)
 #write.csv(Harmonization_nis_fix,"harmonization_bdc_fix_nis.csv",row.names = F)
+```
+
+Update NIS vector
+```{r}
+nis_harmo=nis %>% 
+  left_join(Harmonization_nis_fix,by="Species_updated_name_fishbase") %>% 
+  select(species=corrected,
+         lessepsian=Lessepsian)
+```
+
+join with the harmonization_fix for later use
+```{r}
+species_df_harmo=Harmonization_fix %>% 
+  select(species=corrected) %>% 
+  left_join(nis_harmo,by="species") %>% 
+  mutate(lessepsian=case_when(species%in%"Centrophorus granulosus"~0,
+                              species%in%"Coelorinchus occa"~0,
+                              species%in%"Gaidropsarus biscayensis"~0,
+                              species%in%"Molva dypterygia"~0,
+                              species%in%"Stomias boa boa"~0,
+                              species%in%"Trachyscorpia cristulata echinata"~0,
+                              species%in%"Trisopterus capelanus"~0,
+                              species%in%"Trachyscorpia cristulata echinata"~0,
+                              species%in%"Salmo trutta trutta"~0,
+                              species%in%"Arnoglossus kessleri"~0,
+                              TRUE~lessepsian)) %>% 
+  distinct(species,lessepsian)
+
+#write.csv(species_df_harmo,"nis_native_harmo.csv",row.names = F)
 ```
 
