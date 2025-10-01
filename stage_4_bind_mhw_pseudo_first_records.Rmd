@@ -15,8 +15,8 @@ library(tidyverse)
 data
 ```{r}
 #trended
-clim=read_rds("climatology_df_median_sst_10m.rds")
-events=read_rds("event_df_median_sst_10m.rds")
+# clim=read_rds("climatology_df_median_sst_10m.rds")
+# events=read_rds("event_df_median_sst_10m.rds")
 #detrended
 clim_dt=read_rds("climatology_dt_df.rds")
 events_dt=read_rds("event_dt_df.rds")
@@ -24,7 +24,7 @@ events_dt=read_rds("event_dt_df.rds")
 
 #1.1) annual cumulative intensity
 Estimate annual cumulative intensity per hexagon
-```{r}
+```{r eval=FALSE, include=FALSE}
 annual_c_int=clim %>% 
   drop_na(median_sst_10m) %>% 
   mutate(
@@ -64,6 +64,7 @@ records_min_count=records_min %>%
   group_by(h3_id,year) %>% 
   summarise(records=n()) %>% 
   rename(year_of_records=year)
+
 #plot
 ggplot(records_min_count)+
   geom_point(aes(x=year_of_records,y=records))
@@ -115,7 +116,9 @@ Bind MHWs with the records of the succeeding year
 c_int_records=annual_c_int %>% 
   left_join(records_min_count,
             by=c("h3_id","year_of_records")) %>% 
-  mutate(records = replace_na(records, 0))
+  mutate(records = replace_na(records, 0)) %>% 
+  left_join(used_cells,by="h3_id") %>% 
+  mutate(weights=log(n_distinct_cells))
 #write.csv(c_int_records,"c_int_records_pseudo_first.csv",row.names = F)
 ```
 
@@ -132,7 +135,7 @@ ggplot(c_int_records)+
 ```
 
 #1.4) GLMMs
-```{r}
+```{r eval=FALSE, include=FALSE}
 library(glmmTMB)
 
 #nbinom2
@@ -169,15 +172,24 @@ annual_c_int_dt=clim_dt %>%
   group_by(h3_id,year_of_mhws) %>% 
   summarise(annual_c_int=sum(intensity)) %>% 
   mutate(year_of_records=year_of_mhws+1)
+
+write_rds(annual_c_int_dt,"annual_c_int_dt.rds")
 ```
 
 #2.2) Bind MHWs and records
 Bind MHWs with the records of the succeeding year
 ```{r}
+#add used cells per hexagon
+used_cells=read_rds("copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m/corrected_hex_level_data/final_data/all_hexagons_distinct_cells_count.rds") %>% 
+    mutate(h3_id = str_remove(h3_id, "_cleaned")) %>% 
+  select(h3_id,n_distinct_cells)
+
 c_int_records_dt=annual_c_int_dt %>% 
   left_join(records_min_count,
             by=c("h3_id","year_of_records")) %>% 
-  mutate(records = replace_na(records, 0))
+  mutate(records = replace_na(records, 0)) %>% 
+  left_join(used_cells,by="h3_id") %>% 
+  mutate(weights=log(n_distinct_cells))
 #write.csv(c_int_records_dt,"c_int_records_pseudo_first_dt.csv",row.names = F)
 ```
 
@@ -198,7 +210,8 @@ ggplot(c_int_records_dt)+
 library(glmmTMB)
 
 #nbinom2
-test2_dt=glmmTMB(data = c_int_records_dt,formula = records~annual_c_int+(1|h3_id),family = "nbinom2")
+test2_dt=glmmTMB(data = c_int_records_dt,formula = records~annual_c_int+(1|h3_id),family = "nbinom2",
+                 weights = weights)
 summary(test2_dt)
 sjPlot::plot_model(test2_dt,type="eff",terms="annual_c_int",show.data = F)+
   theme_bw()
@@ -206,7 +219,10 @@ plot(DHARMa::simulateResiduals(test2_dt))
 MuMIn::r.squaredGLMM(test2_dt)
 AIC(test2_dt)
 #nbinom
-test3_dt=glmmTMB(data = c_int_records_dt,formula = records~annual_c_int+(1|h3_id),family = "nbinom1")
+test3_dt=glmmTMB(data = c_int_records_dt,
+                 formula = records~annual_c_int+(1|h3_id),
+                 family = "nbinom1",
+                 weights = weights)
 summary(test3_dt)
 sjPlot::plot_model(test3_dt,type="eff",terms="annual_c_int",show.data = F)
 plot(DHARMa::simulateResiduals(test3_dt))
@@ -230,7 +246,7 @@ N <- nobs(test3_dt)
 
 # 3. Create a formatted label string
 # Format the p-value to a specific number of decimal places (e.g., 3)
-p_label <- paste0("p-value: ", format.pval(p_value, digits = 3, eps = 0.001))
+p_label <- paste0("p-value ", format.pval(p_value, digits = 3, eps = 0.001))
 N_label <- paste0("n = ", N)
 
 # 4. Determine the position for the labels
@@ -248,7 +264,7 @@ stats_df <- data.frame(
 )
 
 #plot
-ggplot()+
+test3_dt_p=ggplot()+
   geom_point(data=c_int_records_dt,
              aes(x=annual_c_int,y=records),
              color="grey",
@@ -260,16 +276,19 @@ ggplot()+
             aes(x=x,y=predicted))+
   scale_fill_gradient(low = "grey70", high = "red", guide = "none") +
   theme_bw()+
-  scale_y_log10()+
+  #scale_y_log10()+
   labs(x="Annual cumulative intensity (°C-days)",
        y="New records within the analysis period") +
-  
+  #coord_cartesian(ylim=c(0,3))+
   # Add the labels using annotate() for fixed positions
-  annotate("text", x = x_pos, y = y_pos_p, 
+  annotate("text", x = 950, y = 16, 
            label = p_label, 
            hjust = 1, vjust = 1, size = 4) +
-  annotate("text", x = x_pos, y = y_pos_N, 
+  annotate("text", x = 950, y = 14, 
            label = N_label, 
-           hjust = 1, vjust = 1, size = 4) 
+           hjust = 1, vjust = 1, size = 4)+
+  ggbreak::scale_y_break(breaks=c(1,2),scales = c(2,0.5))+
+  scale_y_continuous(breaks=c(0,1,2,5,10,15,20))
+test3_dt_p
+ggsave(filename ="test3_dt_p.png" ,plot =test3_dt_p ,device = "jpeg",units = "cm",width = 15,height = 10)
 ```
-

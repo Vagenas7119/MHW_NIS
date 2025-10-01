@@ -37,14 +37,34 @@ med_test <-
     product       = "MEDSEA_MULTIYEAR_PHY_006_004",
     layer         = "med-cmcc-tem-rean-d",
     variable      = c("thetao"),
-    region        = c(30, 32, 30.5, 32.5),
-    timerange     = c("2021-01-01"),
-    verticalrange = c(-2:0),
+    region        = c(30, 32, 31, 33),
+    timerange     = c("1987-01-01 UTC", "2024-12-31 UTC"),
+    verticalrange = c(-10.6:-1.001),
     progress      = T
 )
 med_test
 med_test$thetao
 med_test %>% str
+med_test_df=as_tibble(med_test)
+#How many dial temp data I have per month?
+test_dial_data=med_test_df %>% 
+     # Unite the 'lat' and 'long' columns into a new column named 'cell_id'
+     unite(
+         col = "cell_id",
+         latitude,
+         longitude,
+         sep = "_",
+         remove = FALSE) %>% 
+  mutate(month=lubridate::month(time),
+         year=lubridate::year(time)) %>% 
+  drop_na() %>% 
+      group_by(year,month,latitude,longitude) %>% 
+      summarise(n=n(),
+              n_na = sum(is.na(as.numeric(thetao))),
+              mean_sst=mean(thetao, na.rm = TRUE),
+              median_sst=median(thetao, na.rm = TRUE))
+#Sum cells do not have data at all but partially missing cells have missing 6-1 days and not more.
+#plot
 plot(med_test["thetao"], col = hcl.colors(100), axes = TRUE)
 ```
 
@@ -61,7 +81,7 @@ VARIABLE <- "thetao" # SST variable
 TIMERANGE <- c("1987-01-01 UTC", "2024-12-31 UTC")
 # Vertical range for SST data is typically at or near the surface.
 # A range like 0 to -1 meter is a safe bet for SST.
-VERTICALRANGE <- c(-10.6:-1.001)
+VERTICALRANGE <- c(-10.6,-1.001)
 # H3 hexagons from your dataframe
 h3_ids <- hex$h3_id %>% unique()
 ```
@@ -74,6 +94,7 @@ if (!dir.exists(output_dir)) {
   dir.create(output_dir)}
 ```
 
+For some reason this step reduces the days in time series. Investigate more
 ```{r}
 # --- Function to download and save data for a single hexagon ---
 download_and_save_hexagon <- function(h3_id) {
@@ -237,7 +258,7 @@ message("All files have been processed.")
 
 Adding unique cell-level IDs
 ```{r}
-test=read_rds("copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m/831e12fffffffff.rds")  %>%
+test=read_rds("copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m/831e9afffffffff.rds")  %>%
      # Unite the 'lat' and 'long' columns into a new column named 'cell_id'
      # The values are separated by an underscore for clarity.
      unite(
@@ -246,16 +267,16 @@ test=read_rds("copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m/831e1
          long,
          sep = "_",
          remove = FALSE  # Set to TRUE if you want to remove the original lat/long columns
-     )
+     ) %>% 
+  mutate(month=lubridate::month(date),
+         year=lubridate::year(date))
 
 #How many dial temp data I have per month?
 test_dial_data=test %>% 
-  mutate(month=lubridate::month(date),
-         year=lubridate::year(date)) %>% 
   group_by(cell_id,year,month) %>% 
     summarise(n=n())
+test_dial_data$n %>% hist
 ```
-
 
 which files are not written?
 ```{r}
@@ -493,5 +514,234 @@ saveRDS(all_hex_data, output_file_path)
 
 message("Combined data for all hexagons has been saved to:")
 message(output_file_path)
+```
+
+Cell count per h3_id
+```{r}
+library(dplyr)
+library(readr)
+library(purrr)
+library(tools) # For file_path_sans_ext and basename
+
+# --- NEW CODE CHUNK: Distinct Cell Count Summary ---
+
+# Define the input and output directories (must match the first script)
+input_dir <- "C:\\Users\\User\\Desktop\\research\\Mentoring and colaborations\\Georgous\\MHW_NIS\\copernicus_data_by_hexagon\\MEDSEA_MULTIYEAR_PHY_006_004_10m/\\corrected_hex_level_data\\"
+output_dir <- "C:\\Users\\User\\Desktop\\research\\Mentoring and colaborations\\Georgous\\MHW_NIS\\copernicus_data_by_hexagon\\MEDSEA_MULTIYEAR_PHY_006_004_10m/\\corrected_hex_level_data\\final_data\\"
+
+# Ensure the output directory exists
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir, recursive = TRUE)
+}
+
+# 1. Get a list of all .rds files
+file_list <- list.files(
+  path = input_dir,
+  pattern = "\\.rds$",
+  full.names = TRUE
+)
+
+# 2. Define the function to summarize distinct cells for a single file
+summarize_distinct_cells <- function(file_path) {
+  # Read the data
+  data <- read_rds(file_path)
+  
+  # Check if the data frame is empty
+  if (nrow(data) == 0) {
+    return(NULL) # Return NULL for empty files
+  }
+  
+  # Extract the h3_id from the filename
+  h3_id_from_name <- tools::file_path_sans_ext(basename(file_path))
+  
+  # Calculate the number of distinct (lat, long) pairs for the entire hexagon file
+  distinct_cells_count <- data %>%
+    summarise(
+      n_distinct_cells = n_distinct(lat, long)
+    ) %>%
+    mutate(h3_id = h3_id_from_name) # Add the h3_id as a new column
+  
+  return(distinct_cells_count)
+}
+
+# 3. Use purrr::map_dfr to apply the function to all files and bind the results
+# The map_dfr function uses bind_rows internally to combine all results.
+all_distinct_cells_summary <- purrr::map_dfr(file_list, summarize_distinct_cells)
+
+# 4. Save the distinct cells summary data frame to a new RDS file
+output_cells_file_path <- file.path(output_dir, "all_hexagons_distinct_cells_count.rds")
+saveRDS(all_distinct_cells_summary, output_cells_file_path)
+
+message("\nDistinct cell count data for all hexagons has been successfully calculated and saved to:")
+message(output_cells_file_path)
+```
+
+#quality checks
+##10m SST
+```{r}
+data_10m=read_rds("copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m/corrected_hex_level_data/final_data/all_hexagons_daily_summary_10m.rds")
+
+overall_start <- min(data_10m$date)
+overall_end <- max(data_10m$date)
+
+#1.1 Identify Start and End Dates
+# Find the start and end dates for each spatial unit (h3_id)
+range_by_h3 <- data_10m %>%
+  group_by(h3_id) %>%
+  summarise(
+    start_date = min(date),
+    end_date = max(date),
+    n_days_recorded = n_distinct(date))
+
+#1.2 Calculate Expected Number of Days
+range_by_h3 <- range_by_h3 %>%
+  mutate(
+    expected_days = as.integer(end_date - start_date) + 1,
+    is_complete = n_days_recorded == expected_days,
+    missing_days = expected_days - n_days_recorded)
+```
+1. Prepare Data and Identify Full Date Range
+```{r}
+# 2. Get a list of all unique h3_ids
+all_h3_ids <- unique(data_10m$h3_id)
+
+# 3. Create a complete sequence of dates for the entire period
+full_date_sequence <- seq(overall_start, overall_end, by = "day")
+```
+
+2. Generate Complete Grid and Identify Missing Entries
+```{r}
+# 1. Create a data frame with all expected combinations of date and h3_id
+expected_grid <- expand_grid(
+  date = full_date_sequence,
+  h3_id = all_h3_ids
+)
+
+# 2. Join the actual data onto the expected grid
+missing_data_diagnosis <- expected_grid %>%
+  left_join(data_10m, by = c("date", "h3_id"))
+
+# 3. Filter to find the missing entries and add year using lubridate::year()
+missing_days_by_h3 <- missing_data_diagnosis %>%
+  filter(is.na(mean_sst_10m)) %>% # Filter where the SST data is missing
+  select(date, h3_id) %>%
+  mutate(year = lubridate::year(date)) # Use lubridate::year() to extract the year
+```
+
+3.1 Summarize Missing Days Across Years and Hexagons
+```{r}
+missing_summary_year_h3 <- missing_days_by_h3 %>%
+  group_by(h3_id, year) %>%
+  summarise(
+    count_missing = n(),
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(count_missing))
+```
+
+3.2 Summarize Missing Days Per Year (Overall)
+```{r}
+missing_summary_year_overall <- missing_days_by_h3 %>%
+  group_by(year) %>%
+  summarise(
+    total_missing_in_year = n(),
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(total_missing_in_year))
+```
+
+3.3 Summarize Missing Days Per Hexagon (Overall)
+```{r}
+missing_summary_h3_overall <- missing_days_by_h3 %>%
+  group_by(h3_id) %>%
+  summarise(
+    total_missing_in_h3 = n(),
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(total_missing_in_h3))
+```
+
+##SST
+```{r}
+data_sst_thin=read_rds("copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004\\corrected_hex_level_data/final_data/all_hexagons_daily_summary.rds")
+
+overall_start <- min(data_sst_thin$date)
+overall_end <- max(data_sst_thin$date)
+
+#1.1 Identify Start and End Dates
+# Find the start and end dates for each spatial unit (h3_id)
+range_by_h3_thin <- data_sst_thin %>%
+  group_by(h3_id) %>%
+  summarise(
+    start_date = min(date),
+    end_date = max(date),
+    n_days_recorded = n_distinct(date))
+
+#1.2 Calculate Expected Number of Days
+range_by_h3_thin <- range_by_h3_thin %>%
+  mutate(
+    expected_days = as.integer(end_date - start_date) + 1,
+    is_complete = n_days_recorded == expected_days,
+    missing_days = expected_days - n_days_recorded)
+```
+1. Prepare Data and Identify Full Date Range
+```{r}
+# 2. Get a list of all unique h3_ids
+all_h3_ids <- unique(data_sst_thin$h3_id)
+
+# 3. Create a complete sequence of dates for the entire period
+full_date_sequence <- seq(overall_start, overall_end, by = "day")
+```
+
+2. Generate Complete Grid and Identify Missing Entries
+```{r}
+# 1. Create a data frame with all expected combinations of date and h3_id
+expected_grid_thin <- expand_grid(
+  date = full_date_sequence,
+  h3_id = all_h3_ids
+)
+
+# 2. Join the actual data onto the expected grid
+missing_data_diagnosis_thin <- expected_grid %>%
+  left_join(data_sst_thin, by = c("date", "h3_id"))
+
+# 3. Filter to find the missing entries and add year using lubridate::year()
+missing_days_by_h3_thin <- missing_data_diagnosis_thin %>%
+  filter(is.na(mean_sst)) %>% # Filter where the SST data is missing
+  select(date, h3_id) %>%
+  mutate(year = lubridate::year(date)) # Use lubridate::year() to extract the year
+```
+
+3.1 Summarize Missing Days Across Years and Hexagons
+```{r}
+missing_summary_year_h3_thin <- missing_days_by_h3_thin %>%
+  group_by(h3_id, year) %>%
+  summarise(
+    count_missing = n(),
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(count_missing))
+```
+
+3.2 Summarize Missing Days Per Year (Overall)
+```{r}
+missing_summary_year_overall_thin <- missing_days_by_h3_thin %>%
+  group_by(year) %>%
+  summarise(
+    total_missing_in_year = n(),
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(total_missing_in_year))
+```
+
+3.3 Summarize Missing Days Per Hexagon (Overall)
+```{r}
+missing_summary_h3_overall <- missing_days_by_h3 %>%
+  group_by(h3_id) %>%
+  summarise(
+    total_missing_in_h3 = n(),
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(total_missing_in_h3))
 ```
 
