@@ -36,15 +36,52 @@ Harmonization$notes %>% unique
 Dealing with unaccepted names
  
 - Trigloporus lastoviza  should be replaced with Chelidonichthys lastoviza
-
 ```{r}
 Harmonization_fix=Harmonization %>% 
   mutate(
     scientificName=case_when(
       original_search%in%"Trigloporus lastoviza"~"Chelidonichthys lastoviza",
+      original_search%in%"Spicara flexuosa"~"Spicara flexuosum",
       TRUE~scientificName)) %>% 
   select(species=original_search,
          corrected=scientificName) %>% 
   mutate(is_cahnged=species==corrected)
+
+
 #write.csv(Harmonization_fix,"harmonization_bdc_fix_MEDITS.csv",row.names = F)
 ```
+
+Find NIS
+```{r}
+nis=readxl::read_excel("C:\\Users\\User\\Desktop\\research\\data\\phd_stereo_bruvs\\data\\Belmaker_Species_Traits.xlsx") %>% 
+  select(1,13)
+
+Harmonization_nis=bdc::bdc_query_names_taxadb(
+  unique(nis$Species_updated_name_fishbase),
+  suggest_names = T)
+```
+
+Dealing with unaccepted names
+```{r}
+Harmonization_nis_fix=Harmonization_nis %>% 
+  mutate(
+    scientificName=case_when(
+      original_search%in%"Foa fo"~"Foa fo",
+      original_search%in%"Nectamia zebrina"~"Nectamia zebrina",
+      original_search%in%"Ostichthys hypsufensis"~"Ostichthys sufensis",
+      original_search%in%"Thamnaconus erythraeensis"~"Thamnaconus erythraeensis",
+      original_search%in%"Zebrus pallaoroi"~"Zebrus pallaoroi",
+      original_search%in%"Gouania pigra"~"Gouania pigra",
+      original_search%in%"Dipturus intermedius"~"Dipturus intermedius",
+      original_search%in%"Spicara flexuosa"~"Spicara flexuosum",
+      original_search%in%"Cheilinus quinquecinctus"~"Cheilinus quinquecinctus",
+      original_search%in%"Equulites popei"~"Equulites popei",
+      original_search%in%"Mola alexandrini"~"Mola alexandrini",
+      TRUE~scientificName)) %>% 
+  filter(!original_search%in%"Plagipsetta sp.") %>% 
+  select(Species_updated_name_fishbase=original_search,
+         corrected=scientificName) %>% 
+  mutate(is_cahnged=Species_updated_name_fishbase==corrected)
+#write.csv(Harmonization_nis_fix,"harmonization_bdc_fix_nis.csv",row.names = F)
+```
+
