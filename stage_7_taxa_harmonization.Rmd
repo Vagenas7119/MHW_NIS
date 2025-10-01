@@ -90,27 +90,27 @@ Update NIS vector
 ```{r}
 nis_harmo=nis %>% 
   left_join(Harmonization_nis_fix,by="Species_updated_name_fishbase") %>% 
-  select(species=corrected,
+  select(corrected,
          lessepsian=Lessepsian)
 ```
 
 join with the harmonization_fix for later use
 ```{r}
 species_df_harmo=Harmonization_fix %>% 
-  select(species=corrected) %>% 
-  left_join(nis_harmo,by="species") %>% 
-  mutate(lessepsian=case_when(species%in%"Centrophorus granulosus"~0,
-                              species%in%"Coelorinchus occa"~0,
-                              species%in%"Gaidropsarus biscayensis"~0,
-                              species%in%"Molva dypterygia"~0,
-                              species%in%"Stomias boa boa"~0,
-                              species%in%"Trachyscorpia cristulata echinata"~0,
-                              species%in%"Trisopterus capelanus"~0,
-                              species%in%"Trachyscorpia cristulata echinata"~0,
-                              species%in%"Salmo trutta trutta"~0,
-                              species%in%"Arnoglossus kessleri"~0,
+  select(species,corrected) %>% 
+  left_join(nis_harmo,by="corrected") %>% 
+  mutate(lessepsian=case_when(corrected%in%"Centrophorus granulosus"~0,
+                              corrected%in%"Coelorinchus occa"~0,
+                              corrected%in%"Gaidropsarus biscayensis"~0,
+                              corrected%in%"Molva dypterygia"~0,
+                              corrected%in%"Stomias boa boa"~0,
+                              corrected%in%"Trachyscorpia cristulata echinata"~0,
+                              corrected%in%"Trisopterus capelanus"~0,
+                              corrected%in%"Trachyscorpia cristulata echinata"~0,
+                              corrected%in%"Salmo trutta trutta"~0,
+                              corrected%in%"Arnoglossus kessleri"~0,
                               TRUE~lessepsian)) %>% 
-  distinct(species,lessepsian)
+  distinct(species,corrected,lessepsian)
 
 #write.csv(species_df_harmo,"nis_native_harmo.csv",row.names = F)
 ```

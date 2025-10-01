@@ -43,6 +43,7 @@ test_climatology = heatwaveR::ts2clm(
   roundClm = 4) %>% 
   mutate(hexagon="831e83fffffffff")
 
+
 #Estimate climatologies for all hexagons using for loop
 ts2clm_list=list()
 #List of h3_ids
@@ -379,4 +380,3 @@ Write detect_event output
 write_rds(climatology_dt_df,"climatology_dt_df.rds")
 write_rds(event_dt_df,"event_dt_df.rds")
 ```
-

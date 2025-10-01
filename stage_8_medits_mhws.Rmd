@@ -1,0 +1,32 @@
+---
+title: "stage_8_medits_mhws"
+author: "Shahar Chaikin"
+date: "2025-10-01"
+output: html_document
+---
+
+library
+```{r}
+library(tidyverse)
+```
+
+Load data
+```{r}
+#MEDITS data
+medits_cleaned=read_rds("annual_biomass_ratio_medits.rds") %>% 
+  left_join(harmo,by="species")
+#MHWs
+mhws_annual_dt=read_rds("annual_c_int_dt.rds") %>% 
+  filter(h3_id%in%medits_cleaned$h3_id %>% unique)
+
+#add MHWs to medits
+medits_mhw=medits_cleaned %>% 
+  left_join(mhws_annual_dt %>% 
+              select(h3_id,
+                     year_of_mhw=year_of_mhws,
+                     annual_c_int),
+            by=c("h3_id","year_of_mhw")) %>% 
+  select(-species) %>% 
+  rename(species=corrected)
+```
+

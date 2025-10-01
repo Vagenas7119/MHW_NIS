@@ -20,6 +20,13 @@ library(stars) # To handle spatiotemporal raster data
 Hexagons to be used for downloading climatic data
 ```{r}
 hex=read.csv("coords_for_clim_extr.csv")
+hex_medits=read.csv("h3_medits2.csv") %>% 
+  select(h3_id=2)
+setdiff(c(1,2,3,4,6),c(1,2,3,4,5))
+
+setdiff(hex_medits$h3_id,hex$h3_id)
+
+hex_records_medits=bind_rows(hex,hex_medits) %>% distinct()
 ```
 
 Download a subset
@@ -83,7 +90,7 @@ TIMERANGE <- c("1987-01-01 UTC", "2024-12-31 UTC")
 # A range like 0 to -1 meter is a safe bet for SST.
 VERTICALRANGE <- c(-10.6,-1.001)
 # H3 hexagons from your dataframe
-h3_ids <- hex$h3_id %>% unique()
+h3_ids <- hex_records_medits$h3_id %>% unique()
 ```
 
 Output dir.

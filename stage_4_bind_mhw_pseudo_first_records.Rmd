@@ -114,6 +114,7 @@ ggplot() +
 Bind MHWs with the records of the succeeding year
 ```{r}
 c_int_records=annual_c_int %>% 
+  filter()
   left_join(records_min_count,
             by=c("h3_id","year_of_records")) %>% 
   mutate(records = replace_na(records, 0)) %>% 
@@ -185,6 +186,7 @@ used_cells=read_rds("copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m
   select(h3_id,n_distinct_cells)
 
 c_int_records_dt=annual_c_int_dt %>% 
+  filter(h3_id%in%records_min_count$h3_id %>% unique) %>% 
   left_join(records_min_count,
             by=c("h3_id","year_of_records")) %>% 
   mutate(records = replace_na(records, 0)) %>% 
@@ -205,7 +207,7 @@ ggplot(c_int_records_dt)+
   geom_point(aes(x=year_of_records,y=annual_c_int))
 ```
 
-#1.4) GLMMs
+#2.4) GLMMs
 ```{r}
 library(glmmTMB)
 
@@ -224,6 +226,8 @@ test3_dt=glmmTMB(data = c_int_records_dt,
                  family = "nbinom1",
                  weights = weights)
 summary(test3_dt)
+performance::check_singularity(test3_dt)
+performance::check_convergence(test3_dt)
 sjPlot::plot_model(test3_dt,type="eff",terms="annual_c_int",show.data = F)
 plot(DHARMa::simulateResiduals(test3_dt))
 MuMIn::r.squaredGLMM(test3_dt)
