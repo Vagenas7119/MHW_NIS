@@ -168,7 +168,7 @@ data_TB_filtered_weight_outlier_remove_only_sp=data_TB_filtered_weight_outlier_r
 #Used polygons
 
 h3_poly_used=data_TB_filtered_weight_outlier_remove_only_sp$h3_id %>% unique()
-write.csv(h3_poly_used,"h3_medits.csv")
+#write.csv(h3_poly_used,"h3_medits.csv")
 # h3_poly_used=h3_poly %>% 
 #   filter(address%in%unique(data_TB_filtered_weight_outlier_remove_only_sp$h3_id))
 # write_rds(h3_poly_used,"h3_poly_used_MEDITS_biomass_new_data_version.rds")
@@ -226,7 +226,7 @@ data_cleaned_with_ab_st_control = data_cleaned_with_ab %>%
 #How many h3_ids were lost?
 h3_poly_used2=data_cleaned_with_ab_st_control$h3_id %>% unique()
 setdiff(h3_poly_used,h3_poly_used2)
-write.csv(h3_poly_used2,"h3_medits2.csv")
+#write.csv(h3_poly_used2,"h3_medits2.csv")
 ```
 
 #6) Controlling for zero abundance throughout the temporal range

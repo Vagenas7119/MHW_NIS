@@ -11,10 +11,11 @@ library(tidyverse)
 ```
 
 Load data
+Biomass
 ```{r}
 #MEDITS data
 medits_cleaned=read_rds("annual_biomass_ratio_medits.rds") %>% 
-  left_join(harmo,by="species")
+  left_join(read.csv("nis_native_harmo.csv"),by="species")
 #MHWs
 mhws_annual_dt=read_rds("annual_c_int_dt.rds") %>% 
   filter(h3_id%in%medits_cleaned$h3_id %>% unique)
@@ -28,5 +29,29 @@ medits_mhw=medits_cleaned %>%
             by=c("h3_id","year_of_mhw")) %>% 
   select(-species) %>% 
   rename(species=corrected)
+
+write_rds(medits_mhw,"medits_mhw.rds")
 ```
 
+Load data
+Abundance
+```{r}
+#MEDITS data
+medits_cleaned_abundance=read_rds("annual_n_ratio_medits.rds") %>% 
+  left_join(read.csv("nis_native_harmo.csv"),by="species")
+#MHWs
+mhws_annual_dt=read_rds("annual_c_int_dt.rds") %>% 
+  filter(h3_id%in%medits_cleaned_abundance$h3_id %>% unique)
+
+#add MHWs to medits
+medits_mhw_n=medits_cleaned_abundance %>% 
+  left_join(mhws_annual_dt %>% 
+              select(h3_id,
+                     year_of_mhw=year_of_mhws,
+                     annual_c_int),
+            by=c("h3_id","year_of_mhw")) %>% 
+  select(-species) %>% 
+  rename(species=corrected)
+
+write_rds(medits_mhw_n,"medits_mhw_n.rds")
+```
