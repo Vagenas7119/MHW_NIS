@@ -1,4 +1,4 @@
-#NEW SET 2025 analysis
+#NEW SET 2025 analysis - MHW combined
 
 # Required Libraries
 library(terra)        # For spatial operations
@@ -69,8 +69,6 @@ spat_data <- vect(
 plot(spat_data, col = "red", pch = 16)
 
 extent<-ext(spat_data)
-
-plot(extent)
 
 # Data Aggregation (First Sighting per Species-Country) with proper ordering
 agg_data <- valid_coords %>%
@@ -259,18 +257,13 @@ country_heatmap <- generate_heatmap(momentum_data, "country_id") +
 country_heatmap
 
 # Generate and save heatmaps with east-to-west ordering
-ggsave("country_heatmap.jpg", 
-       country_heatmap,
-       width = 10, height = 6)
-
-ggsave("msfd_heatmap.jpg", 
-       msfd_heatmap,
-       width = 8, height = 6)
-
-
-# Temporal Analysis (Parallel Processing)
-library(future.apply)
-plan(multisession)  # Enable parallel processing
+# ggsave("country_heatmap.jpg", 
+#        country_heatmap,
+#        width = 10, height = 6)
+# 
+# ggsave("msfd_heatmap.jpg", 
+#        msfd_heatmap,
+#        width = 8, height = 6)
 
 
 # Create the temporal_analysis data frame from your momentum_data_geo
@@ -357,7 +350,7 @@ ecdf_plot <- ggplot(temporal_analysis, aes(x = delta_t, y = factor(t_step),
 # Display the plot
 ecdf_plot
 
-ggsave("ecdf_analysis.jpg", ecdf_plot, width = 9, height = 7)
+#ggsave("ecdf_analysis.jpg", ecdf_plot, width = 9, height = 7)
 
 # Cumulative Spread Analysis
 cumulative_spread_median <- temporal_analysis %>%
@@ -400,392 +393,7 @@ ggplot(cumulative_spread_mean, aes(x = t_step, y = cumulative_time)) +
 
 #ADD THE SPATIAL ASPECT
 
-
-library(terra)
-MED<-vect("C:/Users/geo_v/Desktop/rSDMs/MHW_NIS/MED/iho/iho.shp")
-MED
-
-# 1. First ensure all polygons are valid
-MED_valid <- makeValid(MED)
-
-# 2. Create a common ID for all features
-MED_valid$merge_id <- 1
-
-# 3. Aggregate with dissolve (this is the key step)
-MED_merged <- aggregate(MED_valid, by = "merge_id", dissolve = TRUE)
-
-# 4. Force merge with minimal buffer if lines remain
-#    (using 0.00001 instead of 0 for better stability)
-MED_final <- buffer(MED_merged, width = 0.00001)
-
-# 5. Verify the result
-plot(MED_final, col = "lightblue", main = "Fully Merged Mediterranean")
-
-library(ncdf4)
-library(terra)
-
-# Open the NetCDF file #einai ena aplo raster giati mas dini meses times
-nc_file_temp <- rast("Project/layers/thetao_baseline_2000_2019_depthsurf_4e3e_1426_a71d_U1751549382872.nc")  # Replace with your file path
-plot(nc_file_temp,ext=extent)
-
-# 4. Add points to the plot
-plot(spat_data, add = TRUE, col = "red", pch = 16, cex = 1.2)
-
-nc_file_temp<-mask(nc_file_temp,MED_final)
-
-# Momentum Calculation Function
-calculate_momentum <- function(data) {
-  data <- data %>%
-    arrange(ID, first_area_sighting) %>%
-    group_by(ID) %>%
-    mutate(
-      t_step = row_number() - 1,  # t0, t1, t2...
-      t_flag = ifelse(t_step < 10, 1, 0)  # Limit to t0-t50
-    ) %>%
-    filter(t_flag == 1) %>%
-    ungroup()
-  return(data)
-}
-
-
-# Apply Momentum Calculation
-momentum_data_geo<-  vect(momentum_data,
-                          geom = c("Longitude", "Latitude"),
-                          crs = "EPSG:4326")
-
-momentum_data_geo
-
-#Vamos
-
-library(terra)
-
-# 1. Prepare empty list to store velocity rasters for each species
-velocity_rasters <- list()
-
-# 2. Get unique species IDs
-unique_ids <- unique(momentum_data_geo$ID)
-
-# Create a lookup table of ID to species name
-id_to_name <- data.frame(
-  ID = momentum_data_geo$ID,
-  species = momentum_data_geo$species
-) %>% distinct()
-
-# 3. Process each species separately
-for(species_id in unique_ids) {
-  # Subset data for current species
-  species_data <- momentum_data_geo[momentum_data_geo$ID == species_id, ]
-  
-  # Order by t_step
-  species_data <- species_data[order(species_data$t_step), ]
-  
-  # Skip if only one observation
-  if(nrow(species_data) < 2) next
-  
-  # Get coordinates
-  coords <- crds(species_data)
-  
-  # Calculate distances between consecutive points (in km)
-  # Using Haversine distance for better accuracy
-  dists <- sqrt((diff(coords[,1]) * 111.32 * cos(coords[,2] * pi/180))^2 + 
-                  (diff(coords[,2]) * 111.32)^2)
-  
-  # Improved calculation with proper handling of duplicate years
-  time_diffs <- diff(species_data$first_area_sighting)
-  
-  # First identify which steps to keep (where time_diff != 0)
-  keep <- which(time_diffs != 0)
-  
-  # Then calculate only for valid steps
-  velocities <- numeric(length(time_diffs)) # Initialize empty vector
-  velocities[] <- NA # Default to NA
-  
-  # Only calculate where time_diff != 0
-  if(length(keep) > 0) {
-    velocities[keep] <- dists[keep]/time_diffs[keep]
-  }
-  
-  # Alternative approach using case-wise calculation:
-  # velocities <- mapply(function(d, t) ifelse(t == 0, NA, d/t), 
-  #                     dists, time_diffs)
-  
-  # Create output SpatVector with velocity values
-  result_vect <- species_data[-1, ] # Remove first point (no velocity for it)
-  result_vect$velocity <- velocities
-  
-  #plot(species_data,add=TRUE)
-  
-  # Rasterize velocities for this species
-  vel_raster <- rasterize(result_vect, nc_file_temp, field = "velocity")
-  
-  # Get species name for this ID
-  species_name <- id_to_name$species[id_to_name$ID == species_id]
-  
-  # Create a clean filename (replace spaces with underscores)
-  clean_name <- gsub(" ", "_", species_name)
-  
-  # Store with combined ID-name identifier
-  velocity_rasters[[paste0("ID_", species_id, "_", clean_name)]] <- vel_raster}
-
-library(mapview)
-#mapview(velocity_rasters[[18]])
-
-# For one raster layer (e.g., element 25 in your list)
-non_na_count <- global(!is.na(velocity_rasters[[18]]), "sum", na.rm = TRUE)
-print(paste("Number of cells with values:", non_na_count))
-
-# 4. Create a raster stack of all species velocities
-velocity_stack <- rast(velocity_rasters)
-
-#SUM VELOCITIES
-composite_sum <- sum(velocity_stack, na.rm = TRUE)
-names(composite_sum) <- "total_velocity_sum"
-composite_sum
-#mapview(composite_sum)
-
-#MEAN VELOCITIES
-composite_mean <- mean(velocity_stack, na.rm = TRUE)
-names(composite_mean) <- "mean_velocity"
-composite_mean
-#mapview(composite_mean)
-
-#MAX VELOCITIES
-composite_max <- max(velocity_stack, na.rm = TRUE)
-names(composite_max) <- "max_velocity"
-composite_max
-
-# For one raster layer (e.g., element 25 in your list)
-non_na_count <- global(!is.na(composite_mean), "sum", na.rm = TRUE)
-print(paste("Number of cells with values:", non_na_count))
-
-
-# Tabulate min/max/mean for each layer
-stats<-data.frame(
-  Layer = names(velocity_stack),
-  Min = global(velocity_stack, "min", na.rm=TRUE)[,1],
-  Mean = global(velocity_stack, "mean", na.rm=TRUE)[,1],
-  Max = global(velocity_stack, "max", na.rm=TRUE)[,1]
-)
-
-summary(stats$Max)
-summary(stats$Min)
-summary(stats$Mean)
-
-##########
-
-plot(composite_mean,ext=extent)
-
-#vamos aver max -- Inverse Distance Weighting (IDW)
-
-library(terra)
-library(gstat)
-
-# 1. Prepare your data (example with known points)
-known_pts <- as.points(composite_mean, na.rm = TRUE)
-known_df <- as.data.frame(known_pts, geom = "XY")
-
-# 2. Fit a gstat model (IDW example)
-gmodel <- gstat(
-  formula = mean_velocity~1,  # Using mean value
-  locations = ~x+y, 
-  data = known_df, 
-  nmax = 10  # Use 10 nearest neighbors
-)
-
-# 3. Create prediction grid (only over marine areas)
-marine_mask <- composite_mean  # Copy of original
-values(marine_mask) <- !is.na(values(marine_mask))  # Convert to 1/NA mask
-
-# 4. Perform interpolation WITH masking
-filled <- interpolate(
-  object = marine_mask,  # Use mask as template
-  model = gmodel,
-  xyNames = c("x", "y"),
-  fun = predict
-) %>% 
-  mask(nc_file_temp)  # Restrict to marine areas
-
-plot(filled,ext=extent)
-
-# 5. Combine with original (marine areas only)
-final_result <- cover(composite_mean, filled)
-
-# Verify results
-print(paste("Original NAs:", global(is.na(composite_mean), "sum")[1,1]))
-print(paste("Remaining NAs:", global(is.na(final_result), "sum")[1,1]))
-
-# Visual comparison
-
-plot(c(composite_mean, filled),ext=extent, main = c("Original", "Interpolated"))
-
-
-#mapview(filled)
-
-#### UNCERTAINTY #####
-
-# Calculate uncertainty based on point density (inverse distance to nearest points)
-pts <- as.points(composite_mean, na.rm = TRUE)  # Your original points
-
-# Create distance-to-nearest-point raster
-dist_raster <- distance(marine_mask, pts) %>% 
-  mask(marine_mask)
-
-# 2. Create normalized uncertainty (0-1 range)
-uncertainty <- 1/(dist_raster + 1)  # +1 avoids division by zero
-uncertainty <- uncertainty / global(uncertainty, max, na.rm = TRUE)[1,1]
-
-plot(uncertainty,ext=extent)
-plot(dist_raster,ext=extent)
-#
-
-
-#Scale
-
-# 1. First ensure no NA values in distance raster
-dist_raster <- mask(dist_raster, marine_mask)
-
-dist_raster_mask<-mask(dist_raster,filled)
-
-plot(dist_raster_mask,ext=extent)
-
-
-# 2. Scale distances to 0-1 range (1 = farthest/most uncertain)
-scaled_uncertainty <- dist_raster_mask / global(dist_raster_mask, max, na.rm = TRUE)[1,1]
-
-scaled_uncertainty
-
-plot(scaled_uncertainty,ext=extent)
-
-
-plot(c(composite_max, filled,scaled_uncertainty), main = c("Original", "Interpolated","Uncertainty"),ext=extent)
-
-
-plot(filled$var1.pred,main=c("Interpolated"),ext=extent)
-plot(momentum_data_geo,add=TRUE)
-
-
-#PLOT EM
-library(terra)
-library(ggplot2)
-
-# 1. Prepare the data
-# Convert velocity raster to data frame
-vel_df <- as.data.frame(filled$var1.pred, xy = TRUE, na.rm = TRUE)
-names(vel_df) <- c("longitude", "latitude", "velocity")
-
-# Convert points to data frame
-pts_df <- as.data.frame(geom(momentum_data_geo)[, c("x", "y")])
-names(pts_df) <- c("longitude", "latitude")
-
-# 2. Create the plot
-ggplot() +
-  # Velocity raster
-  geom_raster(data = vel_df, 
-              aes(x = longitude, y = latitude, fill = velocity)) +
-  
-  # Observation points
-  geom_point(data = pts_df, 
-             aes(x = longitude, y = latitude),
-             color = "red",fill="red", size = 0.5, shape = 21) +  # Red X markers
-  
-  # Color scale
-  scale_fill_viridis_c(option = "plasma", 
-                       name = "Velocity\n(km/year)",
-                       na.value = NA) +
-  
-  # Titles and theme
-  ggtitle("Interpolated Spread of NIS based on momentum theory 
-    \nbased on IDW (Observation Points, N=14487)") +
-  coord_equal() +  # Maintain aspect ratio
-  theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5))  # Center title
-
-
-#PLOT UNCERTAINTY
-
-#PLOT EM
-library(terra)
-library(ggplot2)
-
-# 1. Prepare the data
-# Convert velocity raster to data frame
-vel_df <- as.data.frame(scaled_uncertainty$lyr1, xy = TRUE, na.rm = TRUE)
-names(vel_df) <- c("longitude", "latitude", "Uncertainty")
-
-# Convert points to data frame
-pts_df <- as.data.frame(geom(momentum_data_geo)[, c("x", "y")])
-names(pts_df) <- c("longitude", "latitude")
-
-# 2. Create the plot
-ggplot() +
-  # Velocity raster
-  geom_raster(data = vel_df, 
-              aes(x = longitude, y = latitude, fill = Uncertainty)) +
-  
-  # Observation points
-  geom_point(data = pts_df, 
-             aes(x = longitude, y = latitude),
-             color = "red",fill="red", size = 0.5, shape = 21,stroke = 0.5) +  # Red X markers
-  
-  # Color scale
-  scale_fill_viridis_c(option = "plasma", 
-                       name = "Uncertainty",
-                       na.value = NA) +
-  
-  # Titles and theme
-  ggtitle("Uncertainty based on Inverted Distance (Observation Points, N=14487)") +
-  coord_equal() +  # Maintain aspect ratio
-  theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5))  # Center title
-
-
-#I wanna standardize the values of the interpolated raster based on the uncertainty
-
-#how to do that? by multiplying :: high uncertainty will give same values, while low will give really high
-vel_df_inter <- as.data.frame(filled$var1.pred, xy = TRUE, na.rm = TRUE)
-vel_df_unc <- as.data.frame(scaled_uncertainty$lyr1, xy = TRUE, na.rm = TRUE)
-
-stand_veloc<-vel_df_inter$var1.pred*(abs(vel_df_unc$lyr1-1))
-str(stand_veloc)
-
-
-stand_veloc_geom<-data.frame(stand_veloc,vel_df$longitude,vel_df$latitude)
-str(stand_veloc_geom)
-
-#standardize it
-library(scales)
-stand_veloc_geom$stand_veloc_01 <- rescale(stand_veloc_geom$stand_veloc, to = c(0, 1))
-
-# 2. Create the plot
-ggplot() +
-  # Velocity raster
-  geom_raster(data = stand_veloc_geom, 
-              aes(x = vel_df.longitude, y = vel_df.latitude, fill = stand_veloc_01)) +
-  
-  # Observation points
-  geom_point(data = pts_df, 
-             aes(x = longitude, y = latitude),
-             color = "red",fill="red", size = 0.5, shape = 21,stroke = 0.5) +  # Red X markers
-  
-  # Color scale
-  scale_fill_viridis_c(option = "plasma", 
-                       name = "Velocity (scaled)",
-                       na.value = NA) +
-  
-  # Titles and theme
-  ggtitle("Standardized Spread of NIS based on Uncertainty (Observation Points, N=14487)") +
-  coord_equal() +  # Maintain aspect ratio
-  theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5))+  labs(x = "longitude",
-                                                       y = "latitude") # C
-
-
-
-#
-
-
-
-#work with Shahar's hexagons
+#Shahar's file
 
 # Data Aggregation (First Sighting per Species-Country) with proper ordering
 agg_data <- valid_coords %>%
@@ -802,12 +410,6 @@ agg_data <- valid_coords %>%
 head(agg_data,20)
 
 annual_c_int_dt <- readRDS("C:/Users/geo_v/Desktop/annual_c_int_dt.rds")
-
-annual_c_int_dt$h3_id<-as.factor(annual_c_int_dt$h3_id)
-
-unique(annual_c_int_dt$h3_id)
-
-levels(annual_c_int_dt$h3_id)
 
 str(annual_c_int_dt)
 
@@ -840,13 +442,7 @@ str(agg_data_with_hex)
 
 # Join species data with MHW data
 combined_data <- agg_data_with_hex %>%
-  left_join(annual_c_int_dt, by = c("h3_id" = "h3_id", "year_for_join" = "year_of_records"))
-
-# Alternative: if you want to use year_of_mhws for joining
-combined_data_alt <- agg_data_with_hex %>%
-  mutate(year_of_mhws = first_area_sighting - 1) %>%
-  left_join(annual_c_int_dt, by = c("h3_id" = "h3_id", "year_of_mhws" = "year_of_mhws"))
-
+  left_join(annual_c_int_dt, by = c("h3_id" = "h3_id", "year_for_join" = "year_of_mhws"))
 
 str(combined_data)
 
@@ -881,6 +477,231 @@ ggplot(records_mhw_clean, aes(x = log(annual_c_int), y = log(total_records))) +
        title = "Relationship between MHW Intensity and Record Count") +
   theme_minimal()
 
+
+#are there are new hexagons added because of MHWs or is it random?
+
+# 1. Calculate annual expansion metrics with MHW context
+annual_expansion <- records_mhw_clean %>%
+  arrange(year_for_join) %>%
+  group_by(year_for_join) %>%
+  summarise(
+    # Spatial expansion metrics
+    total_hexagons = n_distinct(h3_id),
+    total_records = sum(total_records),  # Sampling effort proxy
+    mean_mhw_intensity = mean(annual_c_int, na.rm = TRUE),
+    max_mhw_intensity = max(annual_c_int, na.rm = TRUE),
+    prop_hexagons_with_mhw = sum(annual_c_int > 0) / n(),
+    mhw_occurred = any(annual_c_int > 0),
+    .groups = 'drop'
+  ) %>%
+  # Calculate year-over-year changes
+  mutate(
+    hexagon_growth = total_hexagons - lag(total_hexagons),
+    record_growth = total_records - lag(total_records),
+    percent_hexagon_growth = (total_hexagons / lag(total_hexagons) - 1) * 100,
+    expansion_rate = hexagon_growth / lag(total_hexagons) * 100
+  )
+
+# 2. Identify which years had significant MHW events
+mhw_threshold <- quantile(annual_expansion$mean_mhw_intensity, 0.75, na.rm = TRUE)  # Top 25% as "significant" MHW
+mhw_threshold_low<-quantile(annual_expansion$mean_mhw_intensity, 0.25, na.rm = TRUE) 
+annual_expansion <- annual_expansion %>%
+  mutate(
+    significant_mhw = mean_mhw_intensity > mhw_threshold,
+    mhw_category = case_when(
+      mean_mhw_intensity == 0 ~ "No MHW",
+      mean_mhw_intensity > mhw_threshold_low & mean_mhw_intensity <= mhw_threshold ~ "Medium MHW",
+      mean_mhw_intensity > 0 & mean_mhw_intensity <= mhw_threshold_low ~ "Low MHW",
+      mean_mhw_intensity > mhw_threshold ~ "High MHW"
+    )
+  )
+
+print("Annual expansion with MHW context:")
+print(annual_expansion)
+
+
+#Check whether the ratio between hexagons every year and records is changing across time
+
+
+# Calculate hexagon-to-records ratio
+annual_expansion <- annual_expansion %>%
+  mutate(
+    hexagon_to_record_ratio = total_hexagons / total_records
+  )
+
+print("Annual expansion with hexagon-to-record ratio:")
+print(annual_expansion %>% select(year_for_join, total_hexagons, total_records, hexagon_to_record_ratio, mean_mhw_intensity))
+
+# Plot the ratio over time
+ggplot(annual_expansion, aes(x = year_for_join, y = hexagon_to_record_ratio)) +
+  geom_line(color = "blue", size = 1) +
+  geom_point(aes(color = mhw_category, size = mean_mhw_intensity), alpha = 0.8) +
+  geom_smooth(method = "loess", se = TRUE, color = "red", alpha = 0.3) +
+  scale_color_manual(values = c("No MHW" = "blue", "Low MHW" = "orange","Medium MHW"="purple", "High MHW" = "red")) +
+  scale_size_continuous(name = "MHW Intensity") +
+  labs(
+    x = "Year",
+    y = "Hexagon-to-Record Ratio",
+    title = "Spatial Efficiency of Sampling Over Time",
+    subtitle = "Higher ratio = more hexagons covered per record (better spatial coverage)",
+    color = "MHW Category"
+  ) +
+  theme_minimal()
+
+# Plot with MHW intensity overlay
+ggplot(annual_expansion, aes(x = year_for_join)) +
+  geom_col(aes(y = hexagon_to_record_ratio, fill = mhw_category), alpha = 0.7) +
+  geom_line(aes(y = mean_mhw_intensity / max(mean_mhw_intensity, na.rm = TRUE) * max(hexagon_to_record_ratio, na.rm = TRUE)), 
+            color = "red", size = 1) +
+  geom_point(aes(y = mean_mhw_intensity / max(mean_mhw_intensity, na.rm = TRUE) * max(hexagon_to_record_ratio, na.rm = TRUE)), 
+             color = "darkred", size = 1) +
+  scale_y_continuous(
+    name = "Hexagon-to-Record Ratio",
+    sec.axis = sec_axis(~ . / max(annual_expansion$hexagon_to_record_ratio, na.rm = TRUE) * max(annual_expansion$mean_mhw_intensity, na.rm = TRUE), 
+                        name = "MHW Intensity (°C-days)")
+  ) +
+  scale_fill_manual(values = c("No MHW" = "blue", "Low MHW" = "orange","Medium MHW"="purple", "High MHW" = "red")) +
+  labs(
+    x = "Year",
+    title = "Spatial Coverage Efficiency vs Marine Heatwaves",
+    subtitle = "Bars: spatial efficiency | Red line: MHW intensity",
+    fill = "MHW Category"
+  ) +
+  theme_minimal()
+
+
+
+
+# 3. Compare expansion in MHW vs non-MHW years
+expansion_comparison <- annual_expansion %>%
+  filter(!is.na(hexagon_growth)) %>%  # Remove first year with no growth data
+  group_by(mhw_category) %>%
+  summarise(
+    n_years = n(),
+    mean_hexagon_growth = mean(hexagon_growth, na.rm = TRUE),
+    mean_record_growth = mean(record_growth, na.rm = TRUE),
+    mean_expansion_rate = mean(expansion_rate, na.rm = TRUE),
+    median_hexagon_growth = median(hexagon_growth, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+print("Expansion comparison by MHW category:")
+print(expansion_comparison)
+
+
+# Check if the High MHW vs Others difference is statistically significant
+high_mhw_growth <- annual_expansion %>% filter(mhw_category == "High MHW" & !is.na(hexagon_growth)) %>% pull(hexagon_growth)
+other_growth <- annual_expansion %>% filter(mhw_category != "High MHW" & !is.na(hexagon_growth)) %>% pull(hexagon_growth)
+
+t_test_high_vs_other <- t.test(high_mhw_growth, other_growth)
+cat("High MHW vs Other years - P-value:", t_test_high_vs_other$p.value, "\n")
+
+
+# 4. Statistical tests
+# Test if hexagon growth differs between MHW and non-MHW years
+mhw_years <- annual_expansion %>% filter(significant_mhw == TRUE & !is.na(hexagon_growth))
+non_mhw_years <- annual_expansion %>% filter(significant_mhw == FALSE & !is.na(hexagon_growth))
+
+t_test_result <- t.test(mhw_years$hexagon_growth, non_mhw_years$hexagon_growth)
+cat("\nT-test for hexagon growth (MHW vs non-MHW years):\n")
+cat("P-value:", t_test_result$p.value, "\n")
+cat("Mean growth in MHW years:", mean(mhw_years$hexagon_growth, na.rm = TRUE), "\n")
+cat("Mean growth in non-MHW years:", mean(non_mhw_years$hexagon_growth, na.rm = TRUE), "\n")
+
+# 5. Correlation analysis
+correlation_analysis <- annual_expansion %>%
+  filter(!is.na(hexagon_growth))
+
+cor_hexagon_mhw <- cor(correlation_analysis$hexagon_growth, 
+                       correlation_analysis$mean_mhw_intensity, 
+                       use = "complete.obs")
+
+cor_records_mhw <- cor(correlation_analysis$record_growth, 
+                       correlation_analysis$mean_mhw_intensity, 
+                       use = "complete.obs")
+
+cat("\nCorrelation analysis:\n")
+cat("Hexagon growth vs MHW intensity:", cor_hexagon_mhw, "\n")
+cat("Record growth vs MHW intensity:", cor_records_mhw, "\n")
+
+# 6. Visualize the relationship
+# Plot 1: Hexagon growth vs MHW intensity
+p1 <- ggplot(correlation_analysis, aes(x = mean_mhw_intensity, y = hexagon_growth)) +
+  geom_point(aes(size = total_records, color = mhw_category), alpha = 0.7) +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  scale_color_manual(values = c("No MHW" = "blue", "Low MHW" = "orange","Medium MHW"="purple", "High MHW" = "red")) +
+  labs(
+    x = "Mean MHW Intensity (°C-days)",
+    y = "New Hexagons Added",
+    title = "Spatial Expansion vs Marine Heatwave Intensity",
+    subtitle = paste("Correlation:", round(cor_hexagon_mhw, 3)),
+    color = "MHW Category",
+    size = "Total Records"
+  ) +
+  theme_minimal()
+
+print(p1)
+
+# Plot 2: Time series of expansion and MHW
+p2 <- ggplot(annual_expansion, aes(x = year_for_join)) +
+  geom_col(aes(y = hexagon_growth, fill = mhw_category), alpha = 0.7) +
+  geom_line(aes(y = mean_mhw_intensity * 2), color = "red", size = 1) +  # Scaled for visibility
+  geom_point(aes(y = mean_mhw_intensity * 2), color = "darkred", size = 1) +
+  scale_y_continuous(
+    name = "New Hexagons Added",
+    sec.axis = sec_axis(~ . / 2, name = "MHW Intensity (°C-days)")
+  ) +
+  scale_fill_manual(values = c("No MHW" = "blue", "Low MHW" = "orange","Medium MHW"="purple", "High MHW" = "red")) +
+  labs(
+    x = "Year",
+    title = "Temporal Pattern: Spatial Expansion and Marine Heatwaves",
+    subtitle = "Bars: new hexagons | Red line: MHW intensity",
+    fill = "MHW Category"
+  ) +
+  theme_minimal()
+
+print(p2)
+
+# 7. Multiple regression to separate sampling effort from MHW effect
+model <- lm(hexagon_growth ~ record_growth + mean_mhw_intensity, 
+            data = correlation_analysis)
+
+cat("\nMultiple regression: Hexagon growth ~ Record growth + MHW intensity\n")
+print(summary(model))
+
+# 8. Analyze if MHW drives expansion beyond sampling effort
+# Calculate "excess expansion" - growth beyond what sampling would predict
+sampling_model <- lm(hexagon_growth ~ record_growth, data = correlation_analysis)
+correlation_analysis$predicted_from_sampling <- predict(sampling_model)
+correlation_analysis$excess_expansion <- correlation_analysis$hexagon_growth - correlation_analysis$predicted_from_sampling
+
+# Test if excess expansion correlates with MHW
+cor_excess_mhw <- cor(correlation_analysis$excess_expansion, 
+                      correlation_analysis$mean_mhw_intensity, 
+                      use = "complete.obs")
+
+cat("\nExcess expansion analysis:\n")
+cat("Correlation between excess expansion and MHW:", cor_excess_mhw, "\n")
+
+# Plot excess expansion vs MHW
+p3 <- ggplot(correlation_analysis, aes(x = mean_mhw_intensity, y = excess_expansion)) +
+  geom_point(aes(color = mhw_category), size = 3, alpha = 0.7) +
+  geom_smooth(method = "lm", se = TRUE, color = "purple") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray") +
+  scale_color_manual(values = c("No MHW" = "blue", "Low MHW" = "orange", "High MHW" = "red")) +
+  labs(
+    x = "MHW Intensity (°C-days)",
+    y = "Excess Expansion (beyond sampling prediction)",
+    title = "MHW Effect Beyond Sampling Effort",
+    subtitle = paste("Positive values = more expansion than expected from sampling alone\nCorrelation:", round(cor_excess_mhw, 3)),
+    color = "MHW Category"
+  ) +
+  theme_minimal()
+
+print(p3)
+
+
+### end ###
 
 #remove the 10th percentile of extremes
 
@@ -1027,11 +848,6 @@ ggplot() +
     xlim = c(hex_bbox$xmin, hex_bbox$xmax),
     ylim = c(hex_bbox$ymin, hex_bbox$ymax)
   )
-
-
-
-
-
 
 
 #Lets work on the momentum a bit
@@ -1344,7 +1160,7 @@ summary_plot <- ggplot(t_step_summary, aes(x = t_step, y = n_introductions)) +
 print(summary_plot)
 
 # Save summary plot
-ggsave("t_step_summary_trend.png", summary_plot, width = 10, height = 6, dpi = 300)
+#ggsave("t_step_summary_trend.png", summary_plot, width = 10, height = 6, dpi = 300)
 
 
 
@@ -1489,8 +1305,8 @@ for(i in 1:nrow(top_hubs)) {
 }
 
 # 7. Save the results
-write_csv(hub_hexagons, "hub_hexagons_analysis.csv")
-ggsave("hub_hexagons_map.png", hub_plot, width = 10, height = 8, dpi = 300)
+#write_csv(hub_hexagons, "hub_hexagons_analysis.csv")
+#ggsave("hub_hexagons_map.png", hub_plot, width = 10, height = 8, dpi = 300)
 
 
 
@@ -1656,8 +1472,8 @@ ggplot(hub_mhw_temporal, aes(x = year_of_mhws, y = mean_mhw_hubs)) +
   theme_minimal()
 
 # 10. Save MHW-hub analysis results
-write_csv(hub_mhw_analysis, "hub_mhw_correlation_analysis.csv")
-write_csv(movement_mhw_analysis, "species_movements_mhw_analysis.csv")
+#write_csv(hub_mhw_analysis, "hub_mhw_correlation_analysis.csv")
+#write_csv(movement_mhw_analysis, "species_movements_mhw_analysis.csv")
 
 
 
@@ -1853,7 +1669,7 @@ print("Annual summary of hub network and MHW conditions:")
 print(annual_summary)
 
 # 11. Save annual analysis results
-write_csv(annual_hub_mhw, "annual_hub_connectivity_mhw.csv")
-write_csv(annual_summary, "annual_network_summary.csv")
-write_csv(annual_correlations, "annual_correlations_analysis.csv")
+#write_csv(annual_hub_mhw, "annual_hub_connectivity_mhw.csv")
+#write_csv(annual_summary, "annual_network_summary.csv")
+#write_csv(annual_correlations, "annual_correlations_analysis.csv")
 
