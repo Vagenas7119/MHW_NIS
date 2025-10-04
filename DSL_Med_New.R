@@ -1,821 +1,3 @@
-###Decoding the spread of non-indigenous fishes in the Mediterranean Sea
-
-###For inquiries contact to @Vagenas G. 2024 (g.vagenas@hcmr.gr) | (georgvagenas@gmail.com)
-
-#Required_Libraries
-
-#install.packages("xlsx")
-library(xlsx)
-#install.packages("ggplot2")
-library(ggplot2)
-#install.packages("tidyverse")
-library(tidyverse)
-#install.packages("doBy")
-library(doBy)
-#install.packages("powerjoin")
-library(powerjoin)
-#install.packages("dplyr")
-library(dplyr)
-#install.packages("reshape")
-require(reshape)
-#install.packages("ggjoy")
-require(ggjoy)
-
-#Set_working directory
-setwd("C:/Users/geo_v/Documents/GitHub/MHW_NIS")
-
-#Data_Input [A sample .csv file with 5 columns: "ID","Species","country_id","first_area_sighting","msfd_id"]
-#Note: First Area Sighting is denoted as the date when the species was sighted
-DATA<-read.csv("Analysis_Zenetos_Movement_2024.csv",header=TRUE,sep=";")
-
-str(DATA)
-
-DATA$country_id<-as.factor(DATA$country_id)
-
-#Modification of Variables
-DATA$Species<-as.factor(DATA$Species)
-DATA$country_id<-as.factor(DATA$country_id)
-DATA$msfd_id<-as.factor(DATA$msfd_id)
-DATA$first_area_sighting<-as.numeric(DATA$first_area_sighting)
-
-#removes NAs
-DATA<-orderBy(~ID+first_area_sighting, data=DATA)%>%filter(!DATA$first_area_sighting=="NA")
-
-
-#Calculate each Momentum Steps for all Species on a EEZ based layer
-
-#t0 #First_Sight_Point
-t_zero<-c(1,rep(0,length(DATA$ID)-1))
-for(i in 2:length(DATA$ID)){
-  if(DATA$ID[i]==DATA$ID[i-1])
-  {t_zero[i]=0}
-  else {t_zero[i]=1}
-}
-DATA<-data.frame(DATA,t_zero)
-
-#t1
-t_one<-c(0,rep(0,(length(DATA$ID)-1)))
-for(i in 2:length(DATA$ID)){
-  if((DATA$t_zero[i]<DATA$t_zero[i-1])&(DATA$ID[i]==DATA$ID[i-1]))
-  {t_one[i]=1}
-  else {t_one[i]=0}
-}
-DATA<-data.frame(DATA,t_one)
-
-#t2
-t_two<-c(0,rep(0,(length(DATA$ID)-1)))
-for(i in 2:length(DATA$ID)){
-  if((DATA$t_one[i]<DATA$t_one[i-1])&(DATA$ID[i]==DATA$ID[i-1]))
-  {t_two[i]=1}
-  else {t_two[i]=0}
-}
-DATA<-data.frame(DATA,t_two)
-
-#t3
-t_three<-c(0,rep(0,(length(DATA$ID)-1)))
-for(i in 2:length(DATA$ID)){
-  if((DATA$t_two[i]<DATA$t_two[i-1])&(DATA$ID[i]==DATA$ID[i-1]))
-  {t_three[i]=1}
-  else {t_three[i]=0}
-}
-DATA<-data.frame(DATA,t_three)
-
-#t4
-t_four<-c(0,rep(0,(length(DATA$ID)-1)))
-for(i in 2:length(DATA$ID)){
-  if((DATA$t_three[i]<DATA$t_three[i-1])&(DATA$ID[i]==DATA$ID[i-1]))
-  {t_four[i]=1}
-  else {t_four[i]=0}
-}
-DATA<-data.frame(DATA,t_four)
-
-#t5
-t_five<-c(0,rep(0,(length(DATA$ID)-1)))
-for(i in 2:length(DATA$ID)){
-  if((DATA$t_four[i]<DATA$t_four[i-1])&(DATA$ID[i]==DATA$ID[i-1]))
-  {t_five[i]=1}
-  else {t_five[i]=0}
-}
-DATA<-data.frame(DATA,t_five)
-
-#t6
-t_six<-c(0,rep(0,(length(DATA$ID)-1)))
-for(i in 2:length(DATA$ID)){
-  if((DATA$t_five[i]<DATA$t_five[i-1])&(DATA$ID[i]==DATA$ID[i-1]))
-  {t_six[i]=1}
-  else {t_six[i]=0}
-}
-DATA<-data.frame(DATA,t_six)
-
-#t7
-t_seven<-c(0,rep(0,(length(DATA$ID)-1)))
-for(i in 2:length(DATA$ID)){
-  if((DATA$t_six[i]<DATA$t_six[i-1])&(DATA$ID[i]==DATA$ID[i-1]))
-  {t_seven[i]=1}
-  else {t_seven[i]=0}
-}
-DATA<-data.frame(DATA,t_seven)
-
-#t8
-t_eight<-c(0,rep(0,(length(DATA$ID)-1)))
-for(i in 2:length(DATA$ID)){
-  if((DATA$t_seven[i]<DATA$t_seven[i-1])&(DATA$ID[i]==DATA$ID[i-1]))
-  {t_eight[i]=1}
-  else {t_eight[i]=0}
-}
-DATA<-data.frame(DATA,t_eight)
-
-#t9
-t_nine<-c(0,rep(0,(length(DATA$ID)-1)))
-for(i in 2:length(DATA$ID)){
-  if((DATA$t_eight[i]<DATA$t_eight[i-1])&(DATA$ID[i]==DATA$ID[i-1]))
-  {t_nine[i]=1}
-  else {t_nine[i]=0}
-}
-DATA<-data.frame(DATA,t_nine)
-
-#t10
-t_ten<-c(0,rep(0,(length(DATA$ID)-1)))
-for(i in 2:length(DATA$ID)){
-  if((DATA$t_nine[i]<DATA$t_nine[i-1])&(DATA$ID[i]==DATA$ID[i-1]))
-  {t_ten[i]=1}
-  else {t_ten[i]=0}
-}
-DATA<-data.frame(DATA,t_ten)
-
-#Herein, if needed - apply the source of Supplementary Material from last Section#
-
-###POST_ANALYSIS####
-
-#Movement_Analysis#t0
-
-#Create Countries and step momentum
-
-DATA_momentum<-dplyr::select(DATA,!"ID" & !"Species" & !"first_area_sighting")
-
-DATA_momentum_country<-data.frame(DATA_momentum %>% 
-                                    group_by(country_id) %>% 
-                                    summarise(
-                                      t_zero= sum(t_zero),t_one=sum(t_one),t_two=sum(t_two),t_three=sum(t_three),t_four=sum(t_four),t_five=sum(t_five),t_six=sum(t_six),t_seven=sum(t_seven),t_eight=sum(t_eight),t_nine=sum(t_nine),t_ten=sum(t_ten)))
-
-
-DATA_momentum_msfd<-data.frame(DATA_momentum %>% 
-                                 group_by(msfd_id) %>% 
-                                 summarise(
-                                   t_zero= sum(t_zero),t_one=sum(t_one),t_two=sum(t_two),t_three=sum(t_three),t_four=sum(t_four),t_five=sum(t_five),t_six=sum(t_six),t_seven=sum(t_seven),t_eight=sum(t_eight),t_nine=sum(t_nine),t_ten=sum(t_ten)))
-
-#HEATMAP_Countries
-
-#Remove countries with zero records to improve the visualized output
-
-for (i in 1:nrow(DATA_momentum_country)) {
-  if(sum(DATA_momentum_country[i,-1])==0){
-    DATA_momentum_country<-DATA_momentum_country[-i,]
-  }else{DATA_momentum_country[i,]<-DATA_momentum_country[i,]}
-}
-
-DATA_momentum_country_fixed<-DATA_momentum_country
-
-samp2 <- DATA_momentum_country_fixed[,-1]
-rownames(samp2) <- DATA_momentum_country_fixed[,1]
-DATA_momentum_country_m<-as.matrix(samp2)
-#either with melt
-heatmap_melt_c<-melt(DATA_momentum_country_m)
-
-#reorder from east to west (counter-clockwise)
-heatmap_melt_c$X1<-factor(heatmap_melt_c$X1,levels=c("EG","PS","IL","LB","SY","TR","CY","GR","AL","ME","HR","LY","IT","MT","TN","DZ","ES"))
-
-#save as .tiff
-tiff("deco_c.tiff", units="in", width=11, height=6, res=300)
-
-#NEW HEATMAP
-ggp_c <- ggplot(heatmap_melt_c, aes(X1, X2,fill=value)) +
-  geom_tile(color = "white",
-            lwd = 1.5,
-            linetype = 1) +
-  coord_fixed()+
-  guides(fill = guide_colourbar(barwidth = 1,
-                                barheight = 20))+
-  scale_fill_gradient2(low="white",mid="snow1",high="black")+
-  guides(fill = guide_colourbar(title = "NIS"))+
-  geom_text(aes(label = value), color = "white", size = 6)+ 
-  scale_y_discrete(labels=c(expression(t[0]),
-                            expression(t[1]),
-                            expression(t[2]),
-                            expression(t[3]),
-                            expression(t[4]),
-                            expression(t[5]),
-                            expression(t[6]),
-                            expression(t[7]),
-                            expression(t[8]),
-                            expression(t[9]),
-                            expression(t[10])))+ labs(x="Countries",y="Introductions (Momentum)")
-ggp_c<-ggp_c+theme_light()+theme(axis.text = element_text(size=12,face="bold"),axis.title.y = element_text(size=15,face="bold"),axis.title.x = element_text(size=15,face="bold"))
-ggp_c
-
-dev.off()
-
-#save as .tiff height 600 width 900
-
-#HEATMAP_MSFD
-
-DATA_momentum_msfd_fixed<-DATA_momentum_msfd
-samp2 <- DATA_momentum_msfd_fixed[,-1]
-rownames(samp2) <- DATA_momentum_msfd_fixed[,1]
-DATA_momentum_msfd_m<-as.matrix(samp2)
-#heatmap(DATA_momentum_msfd_m, scale = "row",Rowv = NA, Colv = NA)
-
-#melt
-heatmap_melt_msfd<-melt(DATA_momentum_msfd_m)
-#reorder from east o west
-heatmap_melt_msfd$X1<-factor(heatmap_melt_msfd$X1,levels=c("EMED","CMED","ADRIA","WMED"))
-
-#save as .tiff
-tiff("deco_msfd.tiff", units="in", width=11, height=6, res=300)
-
-#NEW HEATMAP
-ggp_msfd <- ggplot(heatmap_melt_msfd, aes(X1, X2,fill=value)) +
-  geom_tile(color = "white",
-            lwd = 1.5,
-            linetype = 1) +
-  coord_fixed()+
-  guides(fill = guide_colourbar(barwidth = 1,
-                                barheight = 20))+
-  scale_fill_gradient2(low="white",mid="snow1",high="black")+
-  guides(fill = guide_colourbar(title = "NIS"))+
-  geom_text(aes(label = value), color = "white", size = 6)+ 
-  scale_y_discrete(labels=c(expression(t[0]),
-                            expression(t[1]),
-                            expression(t[2]),
-                            expression(t[3]),
-                            expression(t[4]),
-                            expression(t[5]),
-                            expression(t[6]),
-                            expression(t[7]),
-                            expression(t[8]),
-                            expression(t[9]),
-                            expression(t[10])))+ labs(x="MSFD",y="Introductions (Momentum)")
-ggp_msfd<-ggp_msfd+theme_light()+theme(axis.text = element_text(size=10,face="bold"),axis.title.y = element_text(size=15,face="bold"),axis.title.x = element_text(size=10,face="bold"))
-ggp_msfd
-
-dev.off()
-
-##Temporal analysis
-
-#Recall Dataset
-DATA<-read.csv("Analysis_Zenetos_Movement.csv",header=TRUE,sep=";")
-#Modification of Variables
-DATA$Species<-as.factor(DATA$Species)
-DATA$country_id<-as.factor(DATA$country_id)
-DATA$msfd_id<-as.factor(DATA$msfd_id)
-DATA$first_area_sighting<-as.numeric(DATA$first_area_sighting)
-
-#removes NAs
-DATA<-orderBy(~ID+first_area_sighting, data=DATA)%>%filter(!DATA$first_area_sighting=="NA")
-#if( (a[x,y]>1.0)&(a[x,y]<2.0)
-
-#Calculate each Momentum Steps for all Species in Time [Temporal]
-
-t_zero_year<-rep(0,length(t_zero))
-for(i in 1:length(t_zero)){
-  if(t_zero[i]==1)
-  {t_zero_year[i]=DATA$first_area_sighting[i]}
-  else {t_zero_year[i]==0}
-}
-DATA_year<-data.frame(DATA,t_zero_year)
-
-#t1
-t_one_year<-rep(0,length(t_one))
-for(i in 1:length(t_one)){
-  if(t_one[i]==1)
-  {t_one_year[i]=DATA$first_area_sighting[i]}
-  else {t_one_year[i]==0}
-}
-DATA_year<-data.frame(DATA_year,t_one_year)
-
-#t2
-t_two_year<-rep(0,length(t_two))
-for(i in 1:length(t_two)){
-  if(t_two[i]==1)
-  {t_two_year[i]=DATA$first_area_sighting[i]}
-  else {t_two_year[i]==0}
-}
-DATA_year<-data.frame(DATA_year,t_two_year)
-
-#t3
-t_three_year<-rep(0,length(t_three))
-for(i in 1:length(t_three)){
-  if(t_three[i]==1)
-  {t_three_year[i]=DATA$first_area_sighting[i]}
-  else {t_three_year[i]==0}
-}
-DATA_year<-data.frame(DATA_year,t_three_year)
-
-#t4
-t_four_year<-rep(0,length(t_four))
-for(i in 1:length(t_four)){
-  if(t_four[i]==1)
-  {t_four_year[i]=DATA$first_area_sighting[i]}
-  else {t_four_year[i]==0}
-}
-DATA_year<-data.frame(DATA_year,t_four_year)
-
-#t5
-t_five_year<-rep(0,length(t_five))
-for(i in 1:length(t_five)){
-  if(t_five[i]==1)
-  {t_five_year[i]=DATA$first_area_sighting[i]}
-  else {t_five_year[i]==0}
-}
-DATA_year<-data.frame(DATA_year,t_five_year)
-
-#t6
-t_six_year<-rep(0,length(t_six))
-for(i in 1:length(t_six)){
-  if(t_six[i]==1)
-  {t_six_year[i]=DATA$first_area_sighting[i]}
-  else {t_six_year[i]==0}
-}
-DATA_year<-data.frame(DATA_year,t_six_year)
-
-#t7
-t_seven_year<-rep(0,length(t_seven))
-for(i in 1:length(t_seven)){
-  if(t_seven[i]==1)
-  {t_seven_year[i]=DATA$first_area_sighting[i]}
-  else {t_seven_year[i]==0}
-}
-DATA_year<-data.frame(DATA_year,t_seven_year)
-
-#t8
-t_eight_year<-rep(0,length(t_eight))
-for(i in 1:length(t_eight)){
-  if(t_eight[i]==1)
-  {t_eight_year[i]=DATA$first_area_sighting[i]}
-  else {t_eight_year[i]==0}
-}
-DATA_year<-data.frame(DATA_year,t_eight_year)
-
-#t9
-t_nine_year<-rep(0,length(t_nine))
-for(i in 1:length(t_nine)){
-  if(t_nine[i]==1)
-  {t_nine_year[i]=DATA$first_area_sighting[i]}
-  else {t_nine_year[i]==0}
-}
-DATA_year<-data.frame(DATA_year,t_nine_year)
-
-#t10
-t_ten_year<-rep(0,length(t_ten))
-for(i in 1:length(t_ten)){
-  if(t_ten[i]==1)
-  {t_ten_year[i]=DATA$first_area_sighting[i]}
-  else {t_ten_year[i]==0}
-}
-DATA_year<-data.frame(DATA_year,t_ten_year)
-
-#Select certain variables
-DATA_momentum_year<-dplyr::select(DATA_year,!"Species" & !"first_area_sighting" & !"msfd_id")
-DATA_momentum_year_delta<-DATA_momentum_year
-DATA_momentum_year<-replace(DATA_momentum_year, DATA_momentum_year==0, NA)
-
-#Calculate the time step between each momentum (Delta difference)
-
-for(x in 1:(nrow(DATA_momentum_year-1))){
-  for(y in 3:(ncol(DATA_momentum_year)-1)){
-    if(DATA_momentum_year$ID[x+1]==DATA_momentum_year$ID[x]){
-      DATA_momentum_year_delta[x,y]=DATA_momentum_year[x+1,y+1]-DATA_momentum_year[x,y]}
-    else if (DATA_momentum_year$ID[x+1]>DATA_momentum_year$ID[x]){DATA_momentum_year_delta[x,y]=c(NA)}
-  }}
-
-#remove last column and last row since the difference -delta- is calculted
-last_row<-length(DATA_momentum_year_delta$ID)
-last_col<-ncol(DATA_momentum_year_delta)
-DATA_momentum_year_delta<-DATA_momentum_year_delta[-last_row,-last_col]
-
-summary(DATA_momentum_year_delta$t_zero_year,na.rm=TRUE)
-summary(DATA_momentum_year_delta$t_one_year,na.rm=TRUE)
-summary(DATA_momentum_year_delta$t_two_year,na.rm=TRUE)
-summary(DATA_momentum_year_delta$t_three_year,na.rm=TRUE)
-summary(DATA_momentum_year_delta$t_four_year,na.rm=TRUE)
-summary(DATA_momentum_year_delta$t_five_year,na.rm=TRUE)
-summary(DATA_momentum_year_delta$t_six_year,na.rm=TRUE)
-summary(DATA_momentum_year_delta$t_seven_year,na.rm=TRUE)
-summary(DATA_momentum_year_delta$t_eight_year,na.rm=TRUE)
-summary(DATA_momentum_year_delta$t_nine_year,na.rm=TRUE)
-
-#MELT DATASET
-DATA_momentum_year_delta<-dplyr::select(DATA_momentum_year_delta,!"ID")
-DATA_momentum_year_delta_melted<-melt(DATA_momentum_year_delta,na.rm = TRUE)
-
-
-#set the subscript of Delta margins
-step1<-expression(Δt^(t[1]-t[0]))
-step2<-expression(Δt^(t[2]-t[1]))
-step3<-expression(Δt^(t[3]-t[2]))
-step4<-expression(Δt^(t[4]-t[3]))
-step5<-expression(Δt^(t[5]-t[4]))
-step6<-expression(Δt^(t[6]-t[5]))
-step7<-expression(Δt^(t[7]-t[6]))
-step8<-expression(Δt^(t[8]-t[7]))
-step9<-expression(Δt^(t[9]-t[8]))
-step10<-expression(Δt^(t[10]-t[9]))
-
-#ecdf all
-tiff("deco_ecdf_i.tiff", units="in", width=9, height=9, res=300)
-
-#Cumulative density function of all cases #Tail probs #https://cran.r-project.org/web/packages/ggridges/vignettes/introduction.html
-CumDenDelta<-ggplot(DATA_momentum_year_delta_melted, aes(x=value, y =variable, fill = 0.5 - abs(0.5 - stat(ecdf)))) +
-  stat_density_ridges(geom = "density_ridges_gradient", calc_ecdf = TRUE,quantile_lines = TRUE, quantiles = 2,col="red",size=0.7) +
-  scale_fill_viridis_c(name = "Probability", direction = -1,option="F")+scale_x_continuous(breaks=seq(0,50,5),limits=c(0,50))+theme_minimal()
-
-my_labels <- c(step1,step2,step3,step4,step5,step6,step7,step8,step9,step10)
-CumDenDelta<-CumDenDelta+scale_y_discrete(labels=my_labels)+ labs(y="Delta (Δ) of succesive momenta",x="Years")
-CumDenDelta<-CumDenDelta+theme(axis.title = element_text(size = 15),axis.text=element_text(size=12))
-CumDenDelta #Cumulative distribution to all
-
-dev.off()
-
-
-#MELT
-DATA_momentum_year_delta_melted<-melt(DATA_momentum_year_delta,na.rm = TRUE)
-str(DATA_momentum_year_delta_melted)
-
-#Select the countries whereas the proportion equal or higher of 50% of the invasive species is present
-#recall the dataset retrieved from heatmap
-#head(heatmap_melt_c)
-cast_c<-cast(heatmap_melt_c,X1~X2)
-
-#get the proportions
-cast_prop<-cast_c
-dom_c<-rep(0,10)
-for(i in 2:ncol(cast_c)){
-  cast_prop[,i]<-cast_prop[,i]/sum(cast_prop[,i])
-  dom_c[i]<-which.max(cast_prop[,i])
-}
-#cast_prop
-
-rownames(cast_prop)<-cast_prop[,1]
-
-#get the cases with proportion larger than 0.5
-
-dom_countries<-data.frame(matrix(NA,ncol=10,nrow=5))
-#dom_countries<-rep(0,11)
-for(i in 3:ncol(cast_prop)){
-  cast_prop<-cast_prop[order(-cast_prop[,i]),]
-  if(cast_prop[1,i]>0.5){
-    dom_countries[1,i-2]=c(rownames(cast_prop[1,]))
-  }else if(cast_prop[1,i]+cast_prop[2,i]>0.5){
-    dom_countries[1:2,i-2]=c(rownames(cast_prop[1,],),rownames(cast_prop[2,],))
-  }else if(cast_prop[1,i]+cast_prop[2,i]+cast_prop[3,i]>0.5){
-    dom_countries[1:3,i-2]=c(rownames(cast_prop[1,],),rownames(cast_prop[2,],),rownames(cast_prop[3,]))
-  }else{dom_countries[1:4,i-2]=c(rownames(cast_prop[1,],),rownames(cast_prop[2,],),rownames(cast_prop[3,]),rownames(cast_prop[4,]))
-  }
-}
-
-#dom_countries
-
-#arrange countries
-dom_countries1<-c(as.vector(na.omit(dom_countries[,1])))
-dom_countries2<-c(as.vector(na.omit(dom_countries[,2])))
-dom_countries3<-c(as.vector(na.omit(dom_countries[,3])))
-dom_countries4<-c(as.vector(na.omit(dom_countries[,4])))
-dom_countries5<-c(as.vector(na.omit(dom_countries[,5])))
-dom_countries6<-c(as.vector(na.omit(dom_countries[,6])))
-dom_countries7<-c(as.vector(na.omit(dom_countries[,7])))
-dom_countries8<-c(as.vector(na.omit(dom_countries[,8])))
-dom_countries9<-c(as.vector(na.omit(dom_countries[,9])))
-dom_countries10<-c(as.vector(na.omit(dom_countries[,10])))
-
-#herein we bind the dominant countries as cases estimated above along with the respective time step
-melt_t0_1<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries1 & variable=="t_zero_year")
-melt_t1_2<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries2 & variable=="t_one_year")
-melt_t2_3<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries3 & variable=="t_two_year")
-melt_t3_4<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries4 & variable=="t_three_year")
-melt_t4_5<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries5 & variable=="t_four_year")
-melt_t5_6<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries6 & variable=="t_five_year")
-melt_t6_7<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries7 & variable=="t_six_year")
-melt_t7_8<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries8 & variable=="t_seven_year")
-melt_t8_9<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries9 & variable=="t_eight_year")
-melt_t9_10<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries10 & variable=="t_nine_year")
-
-#bind the dataset
-
-dominant_melt_delta<-rbind(melt_t0_1,melt_t1_2,melt_t2_3,melt_t3_4,melt_t4_5,melt_t5_6,melt_t6_7,melt_t7_8,melt_t8_9,melt_t9_10)
-
-#run density function for dominant 
-
-
-#ecdf dom
-tiff("deco_ecdf_ii.tiff", units="in", width=9, height=9, res=300)
-
-#Cumulative density function #Tail probs #https://cran.r-project.org/web/packages/ggridges/vignettes/introduction.html
-
-CumDenDelta_dom<-ggplot(dominant_melt_delta, aes(x=value, y =variable, fill = 0.5 - abs(0.5 - stat(ecdf)))) +
-  stat_density_ridges(geom = "density_ridges_gradient", calc_ecdf = TRUE,quantile_lines = TRUE, quantiles = 2,col="red",size=0.7) +
-  scale_fill_viridis_c(name = "Probability", direction = -1,option="F")+scale_x_continuous(breaks=seq(0,50,5),limits=c(0,50))+theme_minimal()
-my_labels <- c(step1,step2,step3,step4,step5,step6,step7,step8,step9,step10)
-CumDenDelta_dom<-CumDenDelta_dom+scale_y_discrete(labels=my_labels)+ labs(y="Delta (Δ) of succesive momenta | Dominant hotspots (>50%)",x="Years")
-CumDenDelta_dom<-CumDenDelta_dom+theme(axis.title = element_text(size = 15),axis.text=element_text(size=12))
-CumDenDelta_dom
-
-dev.off()
-
-#ANALYZE THE MEDIAN PER TIME STEP
-
-median_delta<-c(0,median(DATA_momentum_year_delta$t_zero_year,na.rm=TRUE),
-                median(DATA_momentum_year_delta$t_one_year,na.rm=TRUE),
-                median(DATA_momentum_year_delta$t_two_year,na.rm=TRUE),
-                median(DATA_momentum_year_delta$t_three_year,na.rm=TRUE),
-                median(DATA_momentum_year_delta$t_four_year,na.rm=TRUE),
-                median(DATA_momentum_year_delta$t_five_year,na.rm=TRUE),
-                median(DATA_momentum_year_delta$t_six_year,na.rm=TRUE),
-                median(DATA_momentum_year_delta$t_seven_year,na.rm=TRUE),
-                median(DATA_momentum_year_delta$t_eight_year,na.rm=TRUE),
-                median(DATA_momentum_year_delta$t_nine_year,na.rm=TRUE))
-step_delta<-c(seq(0,10,1))
-
-Delta_median_process<-data.frame(median_delta,step_delta)
-#Delta_median_process
-Delta_median_process_cum<-Delta_median_process
-
-for(i in 1:11){
-  if(i==1 | i==2){
-    Delta_median_process_cum[i,1]=Delta_median_process[i,1]
-  }else(Delta_median_process_cum[i,1]=Delta_median_process_cum[i,1]+Delta_median_process_cum[i-1,1])
-}
-
-Delta_median_process_cum$step_delta<-as.factor(Delta_median_process_cum$step_delta)
-
-#combination
-tiff("deco_combination.tiff", units="in", width=11, height=9, res=300)
-
-CumDenDelta_process<-ggplot(
-  Delta_median_process_cum,
-  aes(x=median_delta, y=step_delta,group = 1))+geom_point(size=3)+geom_smooth()+theme_light()+ labs(y="Delta (Δt) of momentums | Dominant hotspot (Cumulative; >50%)",x="Years")+theme(axis.title = element_text(size = 15),axis.text=element_text(size=12))
-CumDenDelta_process
-
-my_labels <- c(step0,step1,step2,step3,step4,step5,step6,step7,step8,step9,step10)
-CumDenDelta_process<-CumDenDelta_process+scale_x_continuous(breaks=seq(0,30,2),limits=c(0,30))+scale_y_discrete(labels=my_labels)
-CumDenDelta_process<-CumDenDelta_process
-CumDenDelta_process
-
-#Get the cumulative timeframe for all momenta
-#CALCULATE THE DOM FOR ALL INVASIONS NOT JUST THE DOMINANT HOTSPOTS, BOTH CONVERGED
-
-DATA_momentum_year_delta_melted<-melt(DATA_momentum_year_delta,na.rm = TRUE)
-
-melt_t0_1<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries1 & variable=="t_zero_year")
-melt_t1_2<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries2 & variable=="t_one_year")
-melt_t2_3<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries3 & variable=="t_two_year")
-melt_t3_4<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries4 & variable=="t_three_year")
-melt_t4_5<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries5 & variable=="t_four_year")
-melt_t5_6<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries6 & variable=="t_five_year")
-melt_t6_7<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries7 & variable=="t_six_year")
-melt_t7_8<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries8 & variable=="t_seven_year")
-melt_t8_9<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries9 & variable=="t_eight_year")
-melt_t9_10<-filter(DATA_momentum_year_delta_melted,country_id %in% dom_countries10 & variable=="t_nine_year")
-
-#bind_em_all
-
-melt_delta_dom<-rbind(melt_t0_1,melt_t1_2,melt_t2_3,melt_t3_4,melt_t4_5,melt_t5_6,melt_t6_7,melt_t7_8,melt_t8_9,melt_t9_10)
-#melt_delta_dom
-
-
-median_delta_dom<-c(0,median(melt_t0_1$value,variable=="t_one_year",na.rm=TRUE),
-                    median(melt_t1_2$value,variable=="t_two_year",na.rm=TRUE),
-                    median(melt_t2_3$value,variable=="t_three_year",na.rm=TRUE),
-                    median(melt_t3_4$value,variable=="t_four_year",na.rm=TRUE),
-                    median(melt_t4_5$value,variable=="t_five_year",na.rm=TRUE),
-                    median(melt_t5_6$value,variable=="t_six_year",na.rm=TRUE),
-                    median(melt_t6_7$value,variable=="t_seven_year",na.rm=TRUE),
-                    median(melt_t7_8$value,variable=="t_eight_year",na.rm=TRUE),
-                    median(melt_t8_9$value,variable=="t_nine_year",na.rm=TRUE),
-                    median(melt_t9_10$value,variable=="t_ten_year",na.rm=TRUE))
-
-#median_delta_dom
-
-step_delta_dom<-c(seq(0,10,1))
-
-Delta_median_process_dom<-data.frame(median_delta_dom,step_delta_dom)
-#Delta_median_process_dom
-Delta_median_process_cum_dom<-Delta_median_process_dom
-
-for(i in 1:11){
-  if(i==1 | i==2){
-    Delta_median_process_cum_dom[i,1]=Delta_median_process_dom[i,1]
-  }else(Delta_median_process_cum_dom[i,1]=Delta_median_process_cum_dom[i,1]+Delta_median_process_cum_dom[i-1,1])
-}
-
-#Delta_median_process_cum_dom
-Delta_median_process_cum_dom$step_delta_dom<-as.factor(Delta_median_process_cum_dom$step_delta_dom)
-
-#Delta_median_process_cum_dom
-
-#Apply the exact same variable tag for rbind
-
-colnames(Delta_median_process_cum_dom)[1] ="median_delta"
-colnames(Delta_median_process_cum_dom)[2] ="step_delta"
-
-#Converge the dataset
-
-conv_deltas<-rbind(Delta_median_process_cum,Delta_median_process_cum_dom)
-index_col<-c(rep("non_dom",11),rep("dom",11))
-
-conv_deltas_ind<-data.frame(conv_deltas,index_col)
-
-conv_deltas_ind$step_delta<-as.factor(conv_deltas_ind$step_delta)
-
-conv_deltas_ind$index_col<-as.factor(conv_deltas_ind$index_col)
-
-#str(conv_deltas_ind)
-
-#+ geom_line(aes(group = Subject), colour = "blue")
-
-#set the text forms
-step0<-c("Entry Point")
-step1<-expression(Δt^(t[1]-t[0]))
-step2<-expression(Δt^(t[2]-t[1]))
-step3<-expression(Δt^(t[3]-t[2]))
-step4<-expression(Δt^(t[4]-t[3]))
-step5<-expression(Δt^(t[5]-t[4]))
-step6<-expression(Δt^(t[6]-t[5]))
-step7<-expression(Δt^(t[7]-t[6]))
-step8<-expression(Δt^(t[8]-t[7]))
-step9<-expression(Δt^(t[9]-t[8]))
-step10<-expression(Δt^(t[10]-t[9]))
-
-CumDenDelta_process<-ggplot(
-  conv_deltas_ind,
-  aes(x=median_delta, y=step_delta,col=index_col))+geom_point(aes(group=index_col),size=3)+geom_line(aes(group=index_col),size=1)+theme_light()
-
-CumDenDelta_process
-CumDenDelta_process<-CumDenDelta_process+ labs(y="Cumulative median of Delta (Δ) of succesive momenta",x="Years")
-CumDenDelta_process
-CumDenDelta_process<-CumDenDelta_process+theme(axis.title = element_text(size = 15),axis.text=element_text(size=15),legend.title.align=0.5)
-CumDenDelta_process
-
-my_labels <- c(step0,step1,step2,step3,step4,step5,step6,step7,step8,step9,step10)
-CumDenDelta_process<-CumDenDelta_process+scale_x_continuous(breaks=seq(0,30,2),limits=c(0,30))+scale_y_discrete(labels=my_labels)
-CumDenDelta_process<-CumDenDelta_process+scale_colour_discrete(name="Scenario",labels=c('MED NIS (>50%)', 'MED NIS (100%)'))
-CumDenDelta_process
-#width 850
-
-dev.off()
-
-#Convergence
-minus<-(Delta_median_process_cum$median_delta-Delta_median_process_cum_dom$median_delta)/Delta_median_process_cum$median_delta
-minus
-
-conv_deltas_ind
-
-#Average values of scenario (i) & (ii)
-non_dom<-as.vector(Delta_median_process[,1])
-mean(non_dom)
-dom<-as.vector(Delta_median_process_dom[,1])
-mean(dom)
-
-DATA_dio<-read.csv("C:/Users/geo_v/Desktop/rSDMs/MHW_NIS/Dataset_Zenetos_2025_Triple_CSVF.csv",header=TRUE,sep=",",dec=".")
-
-str(DATA_dio)
-
-# #As additional files
-# #Supplementary material_1
-# 
-# #Cumulative invasion process
-# DATAt0<-filter(DATA,DATA$t_zero==1)
-# DATAt0s<-orderBy(~first_area_sighting, data=DATAt0)
-# #cumulative data table
-# Years<-seq(1882,2022,1)
-# n<-rep(0,length(Years))
-# Cum_Year<-data.frame(Years,n)
-# Countd<-dplyr::count(DATAt0s,DATAt0s$first_area_sighting)
-# str(Countd)
-# names(Countd)[names(Countd) == "DATAt0s$first_area_sighting"] <- "Years"
-# 
-# Cumulative_dataset<-merge(Cum_Year,Countd,by="Years",all=T)
-# 
-# Cumulative_dataset[is.na(Cumulative_dataset)] = 0
-# 
-# sum<-rowSums(cbind(Cumulative_dataset[,2],Cumulative_dataset[,3]))
-# 
-# Cumulative_dataset<-data.frame(Cumulative_dataset[,1],sum)
-# plot(Cumulative_dataset)
-# 
-# names(Cumulative_dataset)[names(Cumulative_dataset) == "Cumulative_dataset...1."] <- "Years"
-# names(Cumulative_dataset)[names(Cumulative_dataset) == "sum"] <- "Obs"
-# 
-# CumFreq<-cumsum(Cumulative_dataset$Obs)
-# 
-# Cumulative_dataset<-data.frame(Cumulative_dataset,CumFreq)
-# head(Cumulative_dataset)
-# Cumulative_dataset<-Cumulative_dataset[,-2]
-# #plot(Cumulative_dataset)
-# 
-#
-# require(MASS)
-# require(fitdistrplus)
-# model<-glm(log(CumFreq)~log(Years),family=gaussian,data=Cumulative_dataset)
-# summary(model)
-# coef(model)
-# model$call
-# stepAIC(model)
-# 
-# #define new observation
-# newdata = data.frame(Years=2022)
-# 
-# #use model to predict value of am
-# predict(model, newdata, type="response")
-# 
-# #install.packages("rcompanion")
-# library(rcompanion)
-# nagelkerke(model)
-# 
-# #power model
-# powercum<-lm(log(Cumulative_dataset[,2])~log(Cumulative_dataset[,1]))
-# summary(powercum)
-# expcum<-lm(log(Cumulative_dataset[,2])~Cumulative_dataset[,1])
-# summary(expcum)
-# 
-# #Predict
-# 
-# #powercum slightly betta
-# coefficients(powercum)
-# #loga=intercept--> a=e^(intercept) /  logTL=b
-# a=exp(coefficients(powercum)[1])
-# b=coefficients(powercum)[2]
-# 
-# funCumFreq<-function(x){a*x^b}
-# 
-# predict.lm(powercum,newdata)
-# 
-# Plot_one<- ggplot(Cumulative_dataset, aes(y=CumFreq,x=Years))
-# Plot_one<- Plot_one + geom_point(alpha=0.5,size=2)+ labs(x="Year",y="Introductions (Cumulative frequency)")
-# Plot_one
-# Plot_one<- Plot_one + stat_function(fun=funCumFreq,xlim=c(1880,2020),col="black",alpha=5,size=0.2)
-# Plot_one
-# Plot_one<- Plot_one + scale_x_continuous(breaks=seq(1880,2022,20),limits=c(1880,2022))+scale_y_continuous(breaks=seq(0,150,10),limits=c(0,150))
-# Plot_one<- Plot_one + theme_light()+theme(axis.text = element_text(size=12,face="bold"),axis.title.y = element_text(size=15,face="bold"),axis.title.x = element_text(size=15,face="bold"))
-# Plot_one
-# 
-# 
-# #Supplementary_material_2
-# 
-# #COUNTRY
-# 
-# str(DATA)
-# DATAt0<-filter(DATA,DATA$t_zero==1)
-# str(DATAt0s)
-# Count_country<-dplyr::count(DATAt0s,DATAt0s$country_id)
-# head(Count_country)
-# #Count_country<-orderBy(~n,data=Count_country)
-# Plot_two<-ggplot(Count_country,aes(x=Count_country[,1],y=Count_country[,2]))+geom_bar(aes(x = reorder(Count_country[,1], -Count_country[,2]), y = Count_country[,2]), stat = "identity")
-# Plot_two<-Plot_two+labs(y="Introductions",x="Country")
-# Plot_two<-Plot_two+theme_light()+theme(axis.text = element_text(size=12,face="bold"),axis.title.y = element_text(size=15,face="bold"),axis.title.x = element_text(size=15,face="bold"))
-# Plot_two<-Plot_two+scale_y_continuous(breaks=seq(0,70,10),limits=c(0,70))
-# Plot_two
-# 
-# #Supplementary_material_3
-# 
-# #MSFD_ID
-# 
-# str(DATA)
-# DATAt0<-filter(DATA,DATA$t_zero==1)
-# str(DATAt0s)
-# Count_msfd<-dplyr::count(DATAt0s,DATAt0s$msfd_id)
-# head(Count_msfd)
-# #Count_country<-orderBy(~n,data=Count_country)
-# Plot_three<-ggplot(Count_msfd,aes(x=Count_msfd[,1],y=Count_msfd[,2]))+geom_bar(aes(x = reorder(Count_msfd[,1], -Count_msfd[,2]), y = Count_msfd[,2]), stat = "identity")
-# Plot_three<-Plot_three+labs(y="Introductions",x="MSFD region")
-# Plot_three<-Plot_three+theme_light()+theme(axis.text = element_text(size=12,face="bold"),axis.title.y = element_text(size=15,face="bold"),axis.title.x = element_text(size=15,face="bold"))
-# Plot_three<-Plot_three+scale_y_continuous(breaks=seq(0,140,20),limits=c(0,140))
-# Plot_three
-
-#
-# #set the text forms
-# step0<-c("Entry Point")
-# step1<-expression(Δt^(t[1]))
-# step2<-expression(Δt^(t[2]))
-# step3<-expression(Δt^(t[3]))
-# step4<-expression(Δt^(t[4]))
-# step5<-expression(Δt^(t[5]))
-# step6<-expression(Δt^(t[6]))
-# step7<-expression(Δt^(t[7]))
-# step8<-expression(Δt^(t[8]))
-# step9<-expression(Δt^(t[9]))
-# step10<-expression(Δt^(t[10]))
-
-
-
-
-
-
-
-
-
-
-
-
 #NEW SET 2025 analysis
 
 # Required Libraries
@@ -829,8 +11,6 @@ library(ggridges)     # For density plots
 
 # Set Working Directory
 setwd("C:/Users/geo_v/Desktop/rSDMs/MHW_NIS/")
-
-str(DATA)
 
 # Read and Preprocess Data
 DATA <- read.csv("Dataset_Zenetos_2025_Triple_CSVF.csv", header = TRUE, sep = ",", dec = ".") %>%
@@ -905,6 +85,10 @@ agg_data <- valid_coords %>%
 
 # Verify the results
 head(agg_data,20)
+
+annual_c_int_dt <- readRDS("C:/Users/geo_v/Desktop/annual_c_int_dt.rds")
+
+tail(annual_c_int_dt)
 
 #works
 
@@ -1179,7 +363,11 @@ ggsave("ecdf_analysis.jpg", ecdf_plot, width = 9, height = 7)
 cumulative_spread_median <- temporal_analysis %>%
   group_by(t_step) %>%
   summarise(median_delta = median(delta_t, na.rm = TRUE)) %>%
-  mutate(cumulative_time = cumsum(coalesce(median_delta, 0))) 
+  mutate(cumulative_time = cumsum(coalesce(median_delta, 0)))
+
+zero<-c(0,0,0)
+
+cumulative_spread_median<-rbind(zero,cumulative_spread_median)
 
 ggplot(cumulative_spread_median, aes(x = t_step, y = cumulative_time)) +
   geom_line(color = "steelblue", size = 1.5) +
@@ -1187,12 +375,17 @@ ggplot(cumulative_spread_median, aes(x = t_step, y = cumulative_time)) +
   labs(title = "Cumulative Spread Timeline (Median)",
        x = "Introduction Step", 
        y = "Cumulative Years") +
+  scale_x_continuous(limits = c(0, 10), breaks = 0:10) +
+  scale_y_continuous(limits = c(0, 6), breaks = 0:round(max(cumulative_spread_median$cumulative_time))) +
   theme_bw()
 
 cumulative_spread_mean <- temporal_analysis %>%
   group_by(t_step) %>%
   summarise(mean_delta = mean(delta_t, na.rm = TRUE)) %>%
-  mutate(cumulative_time = cumsum(coalesce(mean_delta, 0))) 
+  mutate(cumulative_time = cumsum(coalesce(mean_delta, 0)))
+zero<-c(0,0,0)
+
+cumulative_spread_mean<-rbind(zero,cumulative_spread_mean)
 
 ggplot(cumulative_spread_mean, aes(x = t_step, y = cumulative_time)) +
   geom_line(color = "steelblue", size = 1.5) +
@@ -1200,6 +393,8 @@ ggplot(cumulative_spread_mean, aes(x = t_step, y = cumulative_time)) +
   labs(title = "Cumulative Spread Timeline (Average)",
        x = "Introduction Step", 
        y = "Cumulative Years") +
+  scale_x_continuous(limits = c(0, 10), breaks = 1:10) +
+  scale_y_continuous(limits = c(0, NA), breaks = 0:round(max(cumulative_spread_mean$cumulative_time)))+
   theme_bw()
 
 
@@ -1255,8 +450,8 @@ calculate_momentum <- function(data) {
 
 # Apply Momentum Calculation
 momentum_data_geo<-  vect(momentum_data,
-geom = c("Longitude", "Latitude"),
-crs = "EPSG:4326")
+                          geom = c("Longitude", "Latitude"),
+                          crs = "EPSG:4326")
 
 momentum_data_geo
 
@@ -1411,7 +606,6 @@ filled <- interpolate(
   mask(nc_file_temp)  # Restrict to marine areas
 
 plot(filled,ext=extent)
-
 
 # 5. Combine with original (marine areas only)
 final_result <- cover(composite_mean, filled)
@@ -1583,5 +777,1083 @@ ggplot() +
   coord_equal() +  # Maintain aspect ratio
   theme_minimal() +
   theme(plot.title = element_text(hjust = 0.5))+  labs(x = "longitude",
-                                                       y = "latitude") # Center title
+                                                       y = "latitude") # C
+
+
+
+#
+
+
+
+#work with Shahar's hexagons
+
+# Data Aggregation (First Sighting per Species-Country) with proper ordering
+agg_data <- valid_coords %>%
+  group_by(species, country_id,Latitude,Longitude) %>%
+  summarise(
+    first_area_sighting = min(year, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(first_area_sighting) %>%  # Arrange by year first
+  mutate(ID = as.numeric(factor(species))) %>%  # Create species ID
+  arrange(species, first_area_sighting)  # Then arrange by species and year
+
+# Verify the results
+head(agg_data,20)
+
+annual_c_int_dt <- readRDS("C:/Users/geo_v/Desktop/annual_c_int_dt.rds")
+
+annual_c_int_dt$h3_id<-as.factor(annual_c_int_dt$h3_id)
+
+unique(annual_c_int_dt$h3_id)
+
+levels(annual_c_int_dt$h3_id)
+
+str(annual_c_int_dt)
+
+#NEED TO BE SOLVED
+
+# First, make sure your column names are consistent
+# Your data shows "Longitude" but your code uses "long" - let's fix that
+
+# Option 1: Rename columns to match your code
+agg_data_clean <- agg_data %>%
+  rename(lat = Latitude, long = Longitude)
+
+str(agg_data_clean)
+
+# Option 2: Or modify the code to use your actual column names
+# Associate records with H3 hexagons (resolution 7 is commonly used, adjust as needed)
+# Convert species data to H3 resolution 3 to match MHW data
+# Convert species data to H3 resolution 3 to match MHW data
+agg_data_with_hex <- agg_data %>%
+  mutate(
+    h3_id = h3jsr::point_to_cell(
+      sf::st_as_sf(., coords = c("Longitude", "Latitude"), crs = 4326),
+      res = 3  # Match the MHW data resolution
+    ),
+    # Create year column that matches year_of_records in MHW data
+    year_for_join = first_area_sighting
+  )
+
+str(agg_data_with_hex)
+
+# Join species data with MHW data
+combined_data <- agg_data_with_hex %>%
+  left_join(annual_c_int_dt, by = c("h3_id" = "h3_id", "year_for_join" = "year_of_records"))
+
+# Alternative: if you want to use year_of_mhws for joining
+combined_data_alt <- agg_data_with_hex %>%
+  mutate(year_of_mhws = first_area_sighting - 1) %>%
+  left_join(annual_c_int_dt, by = c("h3_id" = "h3_id", "year_of_mhws" = "year_of_mhws"))
+
+
+str(combined_data)
+
+# Calculate total records per hexagon per year with MHW data
+records_mhw <- combined_data %>%
+  group_by(h3_id, year_for_join, annual_c_int,ID,first_area_sighting) %>%
+  summarise(
+    total_records = n(),
+    .groups = 'drop'
+  )
+
+str(records_mhw)
+
+# Remove rows with NA MHW data
+records_mhw_clean <- records_mhw %>% filter(!is.na(annual_c_int))
+
+# Optional: Visualize the relationship
+
+# Optional: Visualize the relationship
+ggplot(records_mhw_clean, aes(x = annual_c_int, y = total_records)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(x = "MHW Intensity (C-days)", y = "Number of Records", 
+       title = "Relationship between MHW Intensity and Record Count") +
+  theme_minimal()
+
+
+ggplot(records_mhw_clean, aes(x = log(annual_c_int), y = log(total_records))) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(x = "MHW Intensity (C-days)", y = "Number of Records", 
+       title = "Relationship between MHW Intensity and Record Count") +
+  theme_minimal()
+
+
+#remove the 10th percentile of extremes
+
+records_mhw_filtered <- records_mhw_clean #%>%
+  # filter(
+  #   annual_c_int <= quantile(annual_c_int, 0.9, na.rm = TRUE),
+  #   total_records <= quantile(total_records, 0.9, na.rm = TRUE)
+  # )
+
+ggplot(records_mhw_filtered, aes(x = log(annual_c_int), y = log(total_records))) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(x = "MHW Intensity (C-days)", y = "Number of Records", 
+       title = "Relationship between MHW Intensity and Record Count (90th percentile)") +
+  theme_minimal()
+
+
+#Visualization
+# Step 1: Aggregate data (same as before)
+hexagon_summary <- records_mhw_clean %>%
+  group_by(h3_id) %>%
+  summarise(
+    mean_records = mean(total_records, na.rm = TRUE),
+    mean_mhw = mean(annual_c_int, na.rm = TRUE),
+    n_years = n_distinct(year_for_join),
+    .groups = 'drop'
+  )
+
+# Step 2: Create polygons as a separate dataframe with h3_id
+hex_polygons_df <- data.frame(
+  h3_id = hexagon_summary$h3_id,
+  geometry = h3jsr::cell_to_polygon(hexagon_summary$h3_id, simple = FALSE)
+)
+
+# Step 3: Join and convert to SF
+hexagons_sf <- hex_polygons_df %>%
+  left_join(hexagon_summary, by = "h3_id") %>%
+  st_as_sf()
+
+# Plot by record density
+ggplot(hexagons_sf) +
+  geom_sf(aes(fill = mean_records), color = "white", size = 0.1) +
+  scale_fill_viridis_c(
+    name = "Mean Records",
+    trans = "log10",
+    labels = scales::comma
+  ) +
+  labs(
+    title = "Spatial Distribution of Biodiversity Records",
+    subtitle = "Mean records per hexagon across all years"
+  ) +
+  theme_minimal() +
+  theme(axis.text = element_blank())
+
+# Plot by MHW intensity
+ggplot(hexagons_sf) +
+  geom_sf(aes(fill = mean_mhw), color = "white", size = 0.1) +
+  scale_fill_viridis_c(
+    name = "Mean MHW Intensity\n(°C-days)",
+    option = "plasma"
+  ) +
+  labs(
+    title = "Spatial Distribution of Marine Heatwave Intensity",
+    subtitle = "Mean annual cumulative intensity per hexagon"
+  ) +
+  theme_minimal() +
+  theme(axis.text = element_blank())
+
+
+
+#
+
+# Install packages if needed
+# install.packages("rnaturalearth")
+# install.packages("rnaturalearthdata")
+
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+# Get Natural Earth background map (land and ocean)
+world <- ne_countries(scale = "medium", returnclass = "sf")
+ocean <- ne_download(scale = "medium", type = 'ocean', category = 'physical', returnclass = "sf")
+
+# Get the bounding box of your hexagons
+hex_bbox <- st_bbox(hexagons_sf)
+
+# Plot with background cropped to hexagon extent
+ggplot() +
+  # Ocean background (light grey) - crop to hexagon extent
+  geom_sf(data = ocean, fill = "grey90", color = NA) +
+  # Land (darker grey) - crop to hexagon extent
+  geom_sf(data = world, fill = "grey80",size = 0.2) +
+  # Your hexagons with transparency
+  geom_sf(data = hexagons_sf, aes(fill = mean_records), 
+          color = "white", size = 0.1, alpha = 0.4) +
+  scale_fill_viridis_c(
+    name = "Mean Records",
+    trans = "log10",
+    labels = scales::comma
+  ) +
+  labs(
+    title = "Spatial Distribution of Biodiversity Records",
+    subtitle = "Mean records per hexagon across all years"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    panel.background = element_rect(fill = "lightblue", color = NA)
+  ) +
+  # Set the plot limits to match hexagon bounding box
+  coord_sf(
+    xlim = c(hex_bbox$xmin, hex_bbox$xmax),
+    ylim = c(hex_bbox$ymin, hex_bbox$ymax)
+  )
+
+
+
+# Plot with background cropped to hexagon extent
+ggplot() +
+  # Ocean background (light grey) - crop to hexagon extent
+  geom_sf(data = ocean, fill = "grey99", color = NA) +
+  # Land (darker grey) - crop to hexagon extent
+  geom_sf(data = world, fill = "grey90", size = 0.2) +
+  # Your hexagons with orange-red palette
+  geom_sf(data = hexagons_sf, aes(fill = mean_records), 
+          color = "white", size = 0.1, alpha = 0.6) +
+  scale_fill_gradientn(
+    name = "Mean Records",
+    colors = c("#FFF5EB", "#FEE6CE", "#FDD0A2", "#FDAE6B", "#FD8D3C", "#F16913", "#D94801", "#A63603", "#7F2704"),
+    trans = "log10",
+    labels = scales::comma
+  ) +
+  labs(
+    title = "Spatial Distribution of Biodiversity Records",
+    subtitle = "Mean NIS records per hexagon across all years"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    panel.background = element_rect(fill = "lightblue", color = NA)
+  ) +
+  # Set the plot limits to match hexagon bounding box
+  coord_sf(
+    xlim = c(hex_bbox$xmin, hex_bbox$xmax),
+    ylim = c(hex_bbox$ymin, hex_bbox$ymax)
+  )
+
+
+
+
+
+
+
+#Lets work on the momentum a bit
+
+
+
+
+
+
+# Data Aggregation (First Sighting per Species-Hexagon) with proper ordering
+agg_data_hex <- combined_data %>%
+  group_by(species, h3_id, Latitude, Longitude) %>%
+  summarise(
+    first_area_sighting = min(first_area_sighting, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(first_area_sighting) %>%  # Arrange by year first
+  mutate(ID = as.numeric(factor(species))) %>%  # Create species ID
+  arrange(species, first_area_sighting)  # Then arrange by species and year
+
+# Verify the results
+head(agg_data_hex, 20)
+
+# Momentum Calculation Function (same as before)
+calculate_momentum <- function(data) {
+  data <- data %>%
+    arrange(ID, first_area_sighting, Latitude, Longitude) %>%
+    group_by(ID) %>%
+    mutate(
+      t_step = row_number() - 1,  # t0, t1, t2...
+      t_flag = ifelse(t_step < 11, 1, 0)  # Limit to t0-t10
+    ) %>%
+    filter(t_flag == 1) %>%
+    ungroup()
+  return(data)
+}
+
+# Apply Momentum Calculation
+momentum_data_hex <- calculate_momentum(agg_data_hex)
+
+# Create hexagon ordering (east to west based on longitude)
+hexagon_order <- momentum_data_hex %>%
+  group_by(h3_id) %>%
+  summarise(mean_lon = mean(Longitude, na.rm = TRUE)) %>%
+  arrange(mean_lon) %>%
+  pull(h3_id)
+
+# Generate hexagon heatmap
+generate_hexagon_heatmap <- function(data) {
+  heat_data <- data %>%
+    count(h3_id, t_step) %>%
+    complete(h3_id, t_step = 0:10, fill = list(n = 0)) %>%
+    filter(!is.na(h3_id)) %>%
+    mutate(h3_id = factor(h3_id, levels = hexagon_order))
+  
+  ggplot(heat_data, aes(x = h3_id, y = t_step, fill = n)) +
+    geom_tile(color = "white", lwd = 0.5) +
+    scale_fill_viridis_c(option = "inferno") +
+    scale_y_continuous(
+      breaks = 0:10,
+      labels = c("t₀", paste0("t", 1:10))
+    ) +
+    labs(
+      x = "Hexagons (East to West)",
+      y = "Introduction Momentum",
+      fill = "Count"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 6),
+      axis.text.y = element_text(size = 10)
+    )
+}
+
+# Generate hexagon heatmap
+hexagon_heatmap <- generate_hexagon_heatmap(momentum_data_hex)
+
+# Display the plot
+hexagon_heatmap
+
+# If you have too many hexagons, you might want to filter for the most active ones:
+# Filter for hexagons with at least X records
+active_hexagons <- momentum_data_hex %>%
+  count(h3_id) %>%
+  filter(n >= 0) %>%  # Adjust threshold as needed
+  pull(h3_id)
+
+momentum_data_hex_filtered <- momentum_data_hex %>%
+  filter(h3_id %in% active_hexagons)
+
+# Regenerate heatmap with filtered data
+hexagon_heatmap_filtered <- generate_hexagon_heatmap(momentum_data_hex_filtered)
+hexagon_heatmap_filtered
+
+active_hexagons
+
+
+#provide the spatial representation
+
+# 1. Get hexagons with t_step = 0 (first introductions)
+hexagons_t0 <- momentum_data_hex_filtered %>%
+  filter(t_step == 0) %>%
+  group_by(h3_id) %>%
+  summarise(
+    n_first_introductions = n(),
+    species_list = paste(unique(species), collapse = ", "),
+    mean_lat = mean(Latitude, na.rm = TRUE),
+    mean_lon = mean(Longitude, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# 2. Create density-based probability using ECDF
+# Count how many t_step = 0 records each hexagon has
+t0_counts <- hexagons_t0$n_first_introductions
+
+# Create ECDF of t_step = 0 counts
+ecdf_t0 <- ecdf(t0_counts)
+
+# Calculate probability for each hexagon based on its count density
+hexagons_t0$probability <- ecdf_t0(hexagons_t0$n_first_introductions)
+
+# 3. Convert to spatial polygons
+hexagons_t0_sf <- hexagons_t0 %>%
+  mutate(geometry = h3jsr::cell_to_polygon(h3_id)) %>%
+  st_as_sf()
+
+# Calculate centroid for label placement
+hexagons_t0_sf$centroid <- st_centroid(hexagons_t0_sf$geometry)
+
+# 4. Display hexagons with t_step = 0 and their probabilities
+print("Hexagons with t_step = 0 and their probabilities:")
+print(hexagons_t0_sf %>% st_drop_geometry() %>% arrange(desc(probability)))
+
+# 5. Visualize only hexagons with t_step = 0
+ggplot() +
+  geom_sf(data = ocean, fill = "grey95", color = NA) +
+  geom_sf(data = world, fill = "grey85", color = "grey70", size = 0.1) +
+  geom_sf(data = hexagons_t0_sf, aes(fill = "First Introductions"), 
+          color = "white", size = 0.2, alpha = 0.8) +
+  scale_fill_manual(values = c("First Introductions" = "red"), 
+                    name = "Introduction Type") +
+  labs(
+    title = "Hexagons with First Species Introductions (t_step = 0)",
+    subtitle = "Locations where species were first recorded"
+  ) +
+  theme_minimal() +
+  theme(axis.text = element_blank()) +
+  coord_sf(
+    xlim = c(hex_bbox$xmin, hex_bbox$xmax),
+    ylim = c(hex_bbox$ymin, hex_bbox$ymax)
+  )
+
+# 6. Visualize with ECDF probability coloring and number of introductions
+ggplot() +
+  geom_sf(data = ocean, fill = "grey95", color = NA) +
+  geom_sf(data = world, fill = "grey85", color = "grey70", size = 0.1) +
+  geom_sf(data = hexagons_t0_sf, aes(fill = probability), 
+          color = "white", size = 0.2, alpha = 0.8) +
+  # Add text labels with number of introductions
+  geom_sf_text(data = hexagons_t0_sf, 
+               aes(geometry = centroid, label = n_first_introductions),
+               color = "white", 
+               size = 3,
+               fontface = "bold",alpha=0.5) +
+  scale_fill_viridis_c(
+    name = "ECDF\nProbability",
+    option = "plasma",
+    limits = c(0, 1),
+    labels = scales::percent
+  ) +
+  labs(
+    title = "ECDF-Based Probability of First Introduction Density",
+    subtitle = "Higher probability = more first introductions in hexagon | Numbers show count of introductions"
+  ) +
+  theme_minimal() +
+  theme(axis.text = element_blank()) +
+  coord_sf(
+    xlim = c(hex_bbox$xmin, hex_bbox$xmax),
+    ylim = c(hex_bbox$ymin, hex_bbox$ymax)
+  )
+
+
+
+### run a loop for all ###
+
+
+
+
+
+
+
+
+# Create figures for all t_steps from 0 to 10
+for (t_step_value in 0:10) {
+  
+  # 1. Get hexagons for current t_step
+  hexagons_t <- momentum_data_hex_filtered %>%
+    filter(t_step == t_step_value) %>%
+    group_by(h3_id) %>%
+    summarise(
+      n_introductions = n(),
+      species_list = paste(unique(species), collapse = ", "),
+      mean_lat = mean(Latitude, na.rm = TRUE),
+      mean_lon = mean(Longitude, na.rm = TRUE),
+      .groups = 'drop'
+    )
+  
+  # Skip if no data for this t_step
+  if (nrow(hexagons_t) == 0) {
+    cat("No data for t_step =", t_step_value, "\n")
+    next
+  }
+  
+  # 2. Create density-based probability using ECDF
+  t_counts <- hexagons_t$n_introductions
+  ecdf_t <- ecdf(t_counts)
+  hexagons_t$probability <- ecdf_t(hexagons_t$n_introductions)
+  
+  # 3. Convert to spatial polygons
+  hexagons_t_sf <- hexagons_t %>%
+    mutate(geometry = h3jsr::cell_to_polygon(h3_id)) %>%
+    st_as_sf()
+  
+  # Calculate centroid for label placement
+  hexagons_t_sf$centroid <- st_centroid(hexagons_t_sf$geometry)
+  
+  # 4. Display summary for current t_step
+  cat("\n=== t_step =", t_step_value, "===\n")
+  cat("Number of hexagons:", nrow(hexagons_t), "\n")
+  cat("Total introductions:", sum(hexagons_t$n_introductions), "\n")
+  cat("Mean introductions per hexagon:", mean(hexagons_t$n_introductions), "\n")
+  
+  # 5. Create and save the plot
+  p <- ggplot() +
+    geom_sf(data = ocean, fill = "grey95", color = NA) +
+    geom_sf(data = world, fill = "grey85", color = "grey70", size = 0.1) +
+    geom_sf(data = hexagons_t_sf, aes(fill = probability), 
+            color = "white", size = 0.2, alpha = 0.8) +
+    # Add text labels with number of introductions
+    geom_sf_text(data = hexagons_t_sf, 
+                 aes(geometry = centroid, label = n_introductions),
+                 color = "white", 
+                 size = 3,
+                 fontface = "bold", alpha = 0.5) +
+    scale_fill_viridis_c(
+      name = "ECDF\nProbability",
+      option = "plasma",
+      limits = c(0, 1),
+      labels = scales::percent
+    ) +
+    labs(
+      title = paste("ECDF-Based Probability of t_step =", t_step_value, "Introduction Density"),
+      subtitle = paste("Higher probability = more introductions in hexagon | Numbers show count of introductions")
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_blank(),
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 10)
+    ) +
+    coord_sf(
+      xlim = c(hex_bbox$xmin, hex_bbox$xmax),
+      ylim = c(hex_bbox$ymin, hex_bbox$ymax)
+    )
+  
+  # Display the plot
+  print(p)
+  
+  # Save the plot
+  ggsave(filename = paste0("t_step_", t_step_value, "_probability_map.png"),
+         plot = p,
+         width = 10,
+         height = 8,
+         dpi = 300)
+  
+  # Print top hexagons for this t_step
+  cat("Top hexagons for t_step", t_step_value, ":\n")
+  print(hexagons_t_sf %>% 
+          st_drop_geometry() %>% 
+          arrange(desc(probability)) %>%
+          head(5) %>%
+          select(h3_id, n_introductions, probability))
+}
+
+# Additional: Create a summary table of all t_steps
+t_step_summary <- momentum_data_hex_filtered %>%
+  group_by(t_step) %>%
+  summarise(
+    n_hexagons = n_distinct(h3_id),
+    n_introductions = n(),
+    n_species = n_distinct(species),
+    .groups = 'drop'
+  )
+
+print("Summary across all t_steps:")
+print(t_step_summary)
+
+# Create a summary plot showing trends across t_steps
+summary_plot <- ggplot(t_step_summary, aes(x = t_step, y = n_introductions)) +
+  geom_line(color = "blue", size = 1) +
+  geom_point(color = "red", size = 2) +
+  geom_text(aes(label = n_introductions), vjust = -0.5, size = 3) +
+  labs(
+    title = "Number of Introductions Across Time Steps",
+    x = "Time Step (t)",
+    y = "Number of Introductions"
+  ) +
+  theme_minimal()
+
+print(summary_plot)
+
+# Save summary plot
+ggsave("t_step_summary_trend.png", summary_plot, width = 10, height = 6, dpi = 300)
+
+
+
+
+
+
+
+
+###############
+
+
+#find sequences in the polygons#
+
+
+
+
+
+
+
+
+
+# Find sequential hexagon movements for each species
+
+
+
+
+
+
+
+# Load required libraries
+library(tidyverse)
+library(sf)
+library(h3jsr)
+library(viridis)
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+# Get background maps
+world <- ne_countries(scale = "medium", returnclass = "sf")
+ocean <- ne_download(scale = "medium", type = 'ocean', category = 'physical', returnclass = "sf")
+
+# 1. Find sequential hexagon movements for each species
+species_movements <- momentum_data_hex_filtered %>%
+  arrange(species, t_step) %>%
+  group_by(species, ID) %>%
+  mutate(
+    # Create pairs of consecutive hexagons
+    from_hex = lag(h3_id),
+    to_hex = h3_id,
+    from_t_step = lag(t_step),
+    to_t_step = t_step,
+    from_year = lag(first_area_sighting),
+    to_year = first_area_sighting
+  ) %>%
+  filter(!is.na(from_hex)) %>%  # Remove first observation (no previous hex)
+  ungroup() %>%
+  select(species, ID, from_hex, to_hex, from_t_step, to_t_step, 
+         from_year, to_year)
+
+# 2. Analyze movement patterns across all species
+movement_patterns <- species_movements %>%
+  group_by(from_hex, to_hex) %>%
+  summarise(
+    n_species = n_distinct(species),  # How many species use this route
+    species_list = paste(unique(species), collapse = ", "),
+    from_t_step = first(from_t_step),
+    to_t_step = first(to_t_step),
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(n_species))
+
+# 3. Identify hub hexagons (most outgoing connections)
+hub_hexagons <- movement_patterns %>%
+  group_by(from_hex) %>%
+  summarise(
+    out_degree = n(),                    # Number of unique outgoing connections
+    total_species_out = sum(n_species),  # Total species using these routes
+    avg_t_step = mean(from_t_step),      # Average time step of departures
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(out_degree))
+
+print("Top hub hexagons (most outgoing connections):")
+print(hub_hexagons)
+
+# 4. Convert to spatial polygons for mapping
+hub_sf <- hub_hexagons %>%
+  mutate(geometry = h3jsr::cell_to_polygon(from_hex)) %>%
+  st_as_sf()
+
+# Get bounding box for focused mapping
+hex_bbox <- st_bbox(hub_sf)
+
+# 5. Visualize hub hexagons
+hub_plot <- ggplot() +
+  # Background maps
+  geom_sf(data = ocean, fill = "grey95", color = NA) +
+  geom_sf(data = world, fill = "grey85", color = "grey70", size = 0.1) +
+  # Hub hexagons colored by outgoing connections
+  geom_sf(data = hub_sf, aes(fill = out_degree), 
+          color = "white", size = 0.2, alpha = 0.8) +
+  # Labels for top hubs (top 20%)
+  geom_sf_text(data = hub_sf %>% filter(out_degree >= quantile(out_degree, 0.8)),
+               aes(label = out_degree),
+               color = "white", size = 3, fontface = "bold") +
+  scale_fill_viridis_c(
+    name = "Outgoing\nConnections",
+    option = "plasma"
+  ) +
+  labs(
+    title = "Hub Hexagons in Species Movement Network",
+    subtitle = "Higher values indicate more outgoing connections to other hexagons",
+    caption = "Numbers show count of unique outgoing connections"
+  ) +
+  theme_minimal() +
+  theme(axis.text = element_blank()) +
+  coord_sf(
+    xlim = c(hex_bbox$xmin, hex_bbox$xmax),
+    ylim = c(hex_bbox$ymin, hex_bbox$ymax)
+  )
+
+print(hub_plot)
+
+# 6. Detailed analysis of top hubs
+top_hubs <- hub_hexagons %>%
+  head(10)  # Top 10 hubs
+
+print("Detailed analysis of top 10 hub hexagons:")
+for(i in 1:nrow(top_hubs)) {
+  hub <- top_hubs[i, ]
+  cat("\n--- Hub", i, ":", hub$from_hex, "---\n")
+  cat("Outgoing connections:", hub$out_degree, "\n")
+  cat("Total species using routes:", hub$total_species_out, "\n")
+  
+  # Get destinations from this hub
+  destinations <- movement_patterns %>%
+    filter(from_hex == hub$from_hex) %>%
+    arrange(desc(n_species))
+  
+  cat("Top destinations:\n")
+  print(destinations %>% head(3) %>% select(to_hex, n_species))
+}
+
+# 7. Save the results
+write_csv(hub_hexagons, "hub_hexagons_analysis.csv")
+ggsave("hub_hexagons_map.png", hub_plot, width = 10, height = 8, dpi = 300)
+
+
+
+######### Check if the outgoing connection is related to a marine heatwave
+
+
+# 1. Join MHW data with hub hexagons
+hub_mhw_analysis <- hub_hexagons %>%
+  # Join with annual MHW data to get MHW intensity for each hub
+  left_join(annual_c_int_dt, by = c("from_hex" = "h3_id")) %>%
+  # For each hub, calculate MHW statistics
+  group_by(from_hex, out_degree, total_species_out) %>%
+  summarise(
+    # MHW intensity metrics
+    mean_mhw_intensity = mean(annual_c_int, na.rm = TRUE),
+    max_mhw_intensity = max(annual_c_int, na.rm = TRUE),
+    mhw_frequency = sum(annual_c_int > 0, na.rm = TRUE) / n(),  # Proportion of years with MHW
+    total_mhw_days = sum(annual_c_int, na.rm = TRUE),  # Cumulative MHW intensity
+    n_years_mhw = n_distinct(year_of_mhws),
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(out_degree))
+
+print("Hub hexagons with MHW analysis:")
+print(hub_mhw_analysis)
+
+# 2. Statistical correlation between outgoing connections and MHW metrics
+correlation_analysis <- hub_mhw_analysis %>%
+  select(out_degree, total_species_out, mean_mhw_intensity, max_mhw_intensity, mhw_frequency, total_mhw_days)
+
+correlation_matrix <- cor(correlation_analysis, use = "complete.obs")
+print("Correlation matrix between hub connectivity and MHW metrics:")
+print(correlation_matrix)
+
+# 3. Visualize relationship between outgoing connections and MHW intensity
+ggplot(hub_mhw_analysis, aes(x = mean_mhw_intensity, y = out_degree)) +
+  geom_point(aes(size = total_species_out, color = mhw_frequency), alpha = 0.7) +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  scale_color_viridis_c(name = "MHW Frequency") +
+  scale_size_continuous(name = "Total Species") +
+  labs(
+    x = "Mean MHW Intensity (°C-days)",
+    y = "Outgoing Connections",
+    title = "Relationship Between Hub Connectivity and Marine Heatwave Intensity",
+    subtitle = "Do hexagons with higher MHW intensity have more outgoing connections?"
+  ) +
+  theme_minimal()
+
+# 4. Compare MHW conditions before and during species movements
+movement_mhw_analysis <- species_movements %>%
+  # Get MHW data for source hexagon in the year before movement
+  left_join(annual_c_int_dt, by = c("from_hex" = "h3_id", "from_year" = "year_of_records")) %>%
+  rename(mhw_before_movement = annual_c_int) %>%
+  # Get MHW data for destination hexagon in the movement year
+  left_join(annual_c_int_dt, by = c("to_hex" = "h3_id", "to_year" = "year_of_records")) %>%
+  rename(mhw_at_destination = annual_c_int) %>%
+  # Calculate MHW difference
+  mutate(mhw_difference = mhw_at_destination - mhw_before_movement)
+
+print("MHW conditions during species movements:")
+print(summary(movement_mhw_analysis %>% select(mhw_before_movement, mhw_at_destination, mhw_difference)))
+
+# 5. Analyze if movements are towards higher/lower MHW areas
+mhw_movement_direction <- movement_mhw_analysis %>%
+  mutate(
+    movement_to_higher_mhw = mhw_difference > 0,
+    movement_to_lower_mhw = mhw_difference < 0,
+    movement_to_similar_mhw = mhw_difference == 0
+  ) %>%
+  summarise(
+    n_movements = n(),
+    prop_to_higher_mhw = sum(movement_to_higher_mhw) / n(),
+    prop_to_lower_mhw = sum(movement_to_lower_mhw) / n(),
+    prop_to_similar_mhw = sum(movement_to_similar_mhw) / n()
+  )
+
+print("Movement direction relative to MHW intensity:")
+print(mhw_movement_direction)
+
+# 6. Hub-specific MHW analysis
+hub_movement_mhw <- movement_mhw_analysis %>%
+  group_by(from_hex) %>%
+  summarise(
+    n_movements = n(),
+    avg_mhw_before = mean(mhw_before_movement, na.rm = TRUE),
+    avg_mhw_at_dest = mean(mhw_at_destination, na.rm = TRUE),
+    avg_mhw_difference = mean(mhw_difference, na.rm = TRUE),
+    prop_to_higher_mhw = sum(mhw_difference > 0, na.rm = TRUE) / n(),
+    .groups = 'drop'
+  ) %>%
+  left_join(hub_hexagons, by = "from_hex") %>%
+  arrange(desc(out_degree))
+
+print("Hub-specific MHW movement patterns:")
+print(hub_movement_mhw)
+
+# 7. Visualize hubs with MHW context
+hub_sf_mhw <- hub_sf %>%
+  left_join(hub_mhw_analysis, by = "from_hex")
+
+ggplot() +
+  geom_sf(data = ocean, fill = "grey95", color = NA) +
+  geom_sf(data = world, fill = "grey85", color = "grey70", size = 0.1) +
+  geom_sf(data = hub_sf_mhw, aes(fill = mean_mhw_intensity), 
+          color = "white", size = 0.2, alpha = 0.8) +
+  geom_sf_text(data = hub_sf_mhw %>% filter(out_degree >= quantile(out_degree, 0.8)),
+               aes(label = paste(out_degree, "\n", round(mean_mhw_intensity, 1))),
+               color = "white", size = 2.5, fontface = "bold") +
+  scale_fill_viridis_c(
+    name = "Mean MHW\nIntensity\n(°C-days)",
+    option = "plasma"
+  ) +
+  labs(
+    title = "Hub Hexagons: Connectivity and Marine Heatwave Intensity",
+    subtitle = "Numbers show: outgoing connections | mean MHW intensity",
+    caption = "Higher MHW intensity may influence species dispersal patterns"
+  ) +
+  theme_minimal() +
+  theme(axis.text = element_blank()) +
+  coord_sf(
+    xlim = c(hex_bbox$xmin, hex_bbox$xmax),
+    ylim = c(hex_bbox$ymin, hex_bbox$ymax)
+  )
+
+# 8. Statistical tests
+# Test if hubs with more connections have different MHW characteristics
+high_connectivity_hubs <- hub_mhw_analysis %>%
+  filter(out_degree >= median(out_degree))
+
+low_connectivity_hubs <- hub_mhw_analysis %>%
+  filter(out_degree < median(out_degree))
+
+# T-test for MHW intensity difference
+t_test_result <- t.test(high_connectivity_hubs$mean_mhw_intensity, 
+                        low_connectivity_hubs$mean_mhw_intensity)
+
+cat("\nStatistical test for MHW intensity difference:\n")
+cat("High connectivity hubs (n =", nrow(high_connectivity_hubs), "):", 
+    mean(high_connectivity_hubs$mean_mhw_intensity, na.rm = TRUE), "°C-days\n")
+cat("Low connectivity hubs (n =", nrow(low_connectivity_hubs), "):", 
+    mean(low_connectivity_hubs$mean_mhw_intensity, na.rm = TRUE), "°C-days\n")
+cat("T-test p-value:", t_test_result$p.value, "\n")
+
+# 9. Temporal analysis: MHW trends in hub hexagons
+hub_mhw_temporal <- annual_c_int_dt %>%
+  filter(h3_id %in% hub_hexagons$from_hex) %>%
+  group_by(year_of_mhws) %>%
+  summarise(
+    mean_mhw_hubs = mean(annual_c_int, na.rm = TRUE),
+    n_hubs_with_mhw = sum(annual_c_int > 0),
+    .groups = 'drop'
+  )
+
+ggplot(hub_mhw_temporal, aes(x = year_of_mhws, y = mean_mhw_hubs)) +
+  geom_line(color = "red") +
+  geom_point(aes(size = n_hubs_with_mhw), color = "darkred", alpha = 0.6) +
+  labs(
+    x = "Year",
+    y = "Mean MHW Intensity in Hub Hexagons (°C-days)",
+    title = "Temporal Trends of Marine Heatwaves in Hub Locations",
+    subtitle = "Size of points indicates number of hubs experiencing MHW each year"
+  ) +
+  theme_minimal()
+
+# 10. Save MHW-hub analysis results
+write_csv(hub_mhw_analysis, "hub_mhw_correlation_analysis.csv")
+write_csv(movement_mhw_analysis, "species_movements_mhw_analysis.csv")
+
+
+
+###
+
+
+#break down the hubs annually
+
+
+
+# 1. Create annual movement patterns
+annual_movements <- species_movements %>%
+  group_by(from_hex, to_hex, from_year) %>%
+  summarise(
+    n_species = n_distinct(species),
+    species_list = paste(unique(species), collapse = ", "),
+    from_t_step = first(from_t_step),
+    .groups = 'drop'
+  )
+
+# 2. Calculate annual hub connectivity
+annual_hub_hexagons <- annual_movements %>%
+  group_by(from_hex, from_year) %>%
+  summarise(
+    annual_out_degree = n(),                    # Outgoing connections that year
+    annual_species_out = sum(n_species),        # Total species moving that year
+    .groups = 'drop'
+  ) %>%
+  arrange(from_year, desc(annual_out_degree))
+
+print("Annual hub connectivity (first 20 rows):")
+print(annual_hub_hexagons %>% head(20))
+
+# 3. Join with annual MHW data
+annual_hub_mhw <- annual_hub_hexagons %>%
+  left_join(annual_c_int_dt, by = c("from_hex" = "h3_id", "from_year" = "year_of_records")) %>%
+  rename(annual_mhw_intensity = annual_c_int) %>%
+  # Add whether MHW occurred that year
+  mutate(mhw_occurred = annual_mhw_intensity > 0)
+
+print("Annual hub data with MHW information:")
+print(annual_hub_mhw %>% head(20))
+
+
+#filter after 1987
+annual_hub_mhw<-filter(annual_hub_mhw,annual_hub_mhw$from_year>1989)
+
+
+# 4. Analyze top hubs year by year
+top_annual_hubs <- annual_hub_mhw %>%
+  group_by(from_year) %>%
+  slice_max(order_by = annual_out_degree, n = 5) %>%  # Top 5 hubs each year
+  ungroup()
+
+print("Top 5 hubs each year:")
+print(top_annual_hubs)
+
+# 5. Year-by-year correlation analysis
+annual_correlations <- annual_hub_mhw %>%
+  group_by(from_year) %>%
+  summarise(
+    n_hubs = n(),
+    correlation_outdegree_mhw = cor(annual_out_degree, annual_mhw_intensity, use = "complete.obs"),
+    correlation_species_mhw = cor(annual_species_out, annual_mhw_intensity, use = "complete.obs"),
+    mean_out_degree = mean(annual_out_degree, na.rm = TRUE),
+    mean_mhw_intensity = mean(annual_mhw_intensity, na.rm = TRUE),
+    prop_years_with_mhw = sum(mhw_occurred) / n(),
+    .groups = 'drop'
+  )
+
+print("Annual correlations between connectivity and MHW:")
+print(annual_correlations)
+
+# 6. Visualize annual patterns for top overall hubs
+top_overall_hubs <- hub_hexagons$from_hex[1:6]  # Top 6 overall hubs
+
+annual_top_hubs <- annual_hub_mhw %>%
+  filter(from_hex %in% top_overall_hubs)
+
+ggplot(annual_top_hubs, aes(x = from_year)) +
+  geom_line(aes(y = annual_out_degree, color = "Outgoing Connections"), size = 1) +
+  geom_line(aes(y = annual_mhw_intensity / max(annual_mhw_intensity, na.rm = TRUE) * max(annual_out_degree, na.rm = TRUE), 
+                color = "MHW Intensity (scaled)"), size = 1) +
+  geom_point(aes(y = annual_out_degree, size = annual_species_out), alpha = 0.6) +
+  facet_wrap(~from_hex, scales = "free_y") +
+  scale_y_continuous(
+    name = "Outgoing Connections",
+    sec.axis = sec_axis(~ . / max(annual_top_hubs$annual_out_degree, na.rm = TRUE) * max(annual_top_hubs$annual_mhw_intensity, na.rm = TRUE), 
+                        name = "MHW Intensity (°C-days)")
+  ) +
+  scale_color_manual(values = c("Outgoing Connections" = "blue", "MHW Intensity (scaled)" = "red")) +
+  scale_size_continuous(name = "Number of Species") +
+  labs(
+    title = "Annual Connectivity and MHW Intensity for Top Hub Hexagons",
+    subtitle = "Blue: outgoing connections | Red: MHW intensity | Point size: number of species",
+    x = "Year"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# 7. Yearly hub network visualization
+# Create annual hub maps for key years
+key_years <- seq(min(annual_hub_mhw$from_year, na.rm = TRUE), 
+                 max(annual_hub_mhw$from_year, na.rm = TRUE), by = 5)  # Every 5 years
+
+for(year in key_years) {
+  annual_data <- annual_hub_mhw %>%
+    filter(from_year == year) %>%
+    mutate(geometry = h3jsr::cell_to_polygon(from_hex)) %>%
+    st_as_sf()
+  
+  if(nrow(annual_data) > 0) {
+    p <- ggplot() +
+      geom_sf(data = ocean, fill = "grey95", color = NA) +
+      geom_sf(data = world, fill = "grey85", color = "grey70", size = 0.1) +
+      geom_sf(data = annual_data, aes(fill = annual_out_degree), 
+              color = "white", size = 0.2, alpha = 0.8) +
+      geom_sf_text(data = annual_data %>% filter(annual_out_degree >= quantile(annual_out_degree, 0.8, na.rm = TRUE)),
+                   aes(label = annual_out_degree),
+                   color = "white", size = 3, fontface = "bold") +
+      scale_fill_viridis_c(
+        name = "Annual\nOutgoing\nConnections",
+        option = "plasma"
+      ) +
+      labs(
+        title = paste("Hub Connectivity Network in", year),
+        subtitle = paste("MHW intensity range:", round(min(annual_data$annual_mhw_intensity, na.rm = TRUE), 1), 
+                         "to", round(max(annual_data$annual_mhw_intensity, na.rm = TRUE), 1), "°C-days")
+      ) +
+      theme_minimal() +
+      theme(axis.text = element_blank()) +
+      coord_sf(
+        xlim = c(hex_bbox$xmin, hex_bbox$xmax),
+        ylim = c(hex_bbox$ymin, hex_bbox$ymax)
+      )
+    
+    print(p)
+    ggsave(paste0("hub_network_", year, ".png"), p, width = 10, height = 8, dpi = 300)
+  }
+}
+
+# 8. MHW events and connectivity spikes
+mhw_events_analysis <- annual_hub_mhw %>%
+  group_by(from_hex) %>%
+  mutate(
+    connectivity_change = annual_out_degree - lag(annual_out_degree),
+    mhw_change = annual_mhw_intensity - lag(annual_mhw_intensity),
+    connectivity_spike = connectivity_change > quantile(connectivity_change, 0.75, na.rm = TRUE),
+    mhw_spike = mhw_change > quantile(mhw_change, 0.75, na.rm = TRUE)
+  ) %>%
+  filter(!is.na(connectivity_change) & !is.na(mhw_change))
+
+# Analyze if MHW spikes precede connectivity spikes
+mhw_connectivity_lag <- mhw_events_analysis %>%
+  mutate(
+    mhw_precedes_connectivity = lag(mhw_spike) & connectivity_spike,
+    same_year_spike = mhw_spike & connectivity_spike
+  ) %>%
+  summarise(
+    n_years = n(),
+    prop_mhw_precedes_connectivity = sum(mhw_precedes_connectivity, na.rm = TRUE) / n(),
+    prop_same_year_spike = sum(same_year_spike, na.rm = TRUE) / n(),
+    .groups = 'drop'
+  )
+
+print("Do MHW spikes precede connectivity spikes?")
+print(mhw_connectivity_lag)
+
+# 9. Statistical model: annual connectivity ~ MHW intensity + time
+library(lme4)
+
+# Mixed effects model accounting for hub-specific effects
+connectivity_model <- lmer(annual_out_degree ~ annual_mhw_intensity + from_year + (1 | from_hex), 
+                           data = annual_hub_mhw)
+
+print("Mixed effects model results:")
+print(summary(connectivity_model))
+
+# 10. Create annual summary table
+annual_summary <- annual_hub_mhw %>%
+  group_by(from_year) %>%
+  summarise(
+    total_hubs = n_distinct(from_hex),
+    total_connections = sum(annual_out_degree, na.rm = TRUE),
+    total_species_movements = sum(annual_species_out, na.rm = TRUE),
+    mean_mhw_intensity = mean(annual_mhw_intensity, na.rm = TRUE),
+    hubs_with_mhw = sum(mhw_occurred, na.rm = TRUE),
+    prop_hubs_with_mhw = hubs_with_mhw / total_hubs,
+    .groups = 'drop'
+  )
+
+print("Annual summary of hub network and MHW conditions:")
+print(annual_summary)
+
+# 11. Save annual analysis results
+write_csv(annual_hub_mhw, "annual_hub_connectivity_mhw.csv")
+write_csv(annual_summary, "annual_network_summary.csv")
+write_csv(annual_correlations, "annual_correlations_analysis.csv")
 
