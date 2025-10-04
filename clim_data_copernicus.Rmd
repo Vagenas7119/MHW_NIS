@@ -1,0 +1,236 @@
+---
+title: "clim_data_copernicus"
+author: "Shahar Chaikin"
+date: "2025-09-09"
+output: html_document
+---
+
+Here we will extract climatic data including SST and SBT based on the Copernicus Marine Service and the 'CopernicusDownloadR' R package
+
+Packages
+```{r}
+library(CopernicusDownloadeR)
+library(h3)
+```
+
+Extract the h3 IDs at resoultion 3 for the MEditerranean Sea
+```{r}
+# Bounding box for the Mediterranean Sea
+min_lat <- 30.26
+max_lat <- 45.78
+min_lon <- -6.03
+max_lon <- 36.22
+
+```
+
+# Get H3 Polygons within the Bounding Box
+1) Define a set of points that cover the bounding box. A simple way is to create a grid.
+2) Convert these points to H3 indexes at your desired resolution (3 in this case).
+3) Get the parent polygons of these indexes. This ensures you have the H3 hexagons that are exactly at resolution 3 and contain your grid points.
+```{r}
+# Create a grid of points within the bounding box
+lat_grid <- seq(min_lat, max_lat, by = 0.5)
+lon_grid <- seq(min_lon, max_lon, by = 0.5)
+grid_points <- expand.grid(lat = lat_grid, lon = lon_grid)
+
+# Convert each grid point to an H3 index at resolution 3
+h3_indexes <- h3js::h3_geo_to_h3(grid_points$lat, grid_points$lon, res = 3)
+
+# Get the unique parent H3 indexes at resolution 3
+h3_polygons <- unique(h3_indexes)
+```
+
+More accurate bbox
+```{r}
+# Get coastline data from rnaturalearth
+coastlines <-rnaturalearth::ne_coastline(scale = "large", returnclass = "sf")
+med_shape=sf::st_read("C:\\Users\\User\\Desktop\\research\\Mentoring and colaborations\\Georgous\\MHW_NIS\\World_Seas_IHO_v3\\iho.shp")
+
+# Combine all polygons in the shapefile into a single polygon
+med_sea_polygon <- sf::st_union(med_shape)
+str(med_sea_polygon)
+plot(med_sea_polygon[2])
+# Use h3_polyfill to get all H3 IDs at resolution 3 that intersect with the polygon
+med_h3_ids <-h3jsr::polygon_to_cells(med_sea_polygon[2], res = 3)
+med_h3_ids_vec=unlist(med_h3_ids) %>% tibble::as.tibble()
+#Some are missing
+missing=c("831edcfffffffff",
+          "831ed1fffffffff",
+          "831edefffffffff",
+          "831edafffffffff",
+          "833f72fffffffff",
+          "833f73fffffffff",
+          "833f29fffffffff",
+          "832db0fffffffff",
+          "832db1fffffffff",
+          "832da3fffffffff",
+          "833f68fffffffff",
+          "831ecafffffffff",
+          "831ecefffffffff",
+          "831ec3fffffffff",
+          "833e2cfffffffff",
+          "833f5afffffffff",
+          "833e2dfffffffff",
+          "833e25fffffffff",
+          "833f19fffffffff",
+          "833f69fffffffff",
+          "833f63fffffffff",
+          "833f64fffffffff",
+          "833f2cfffffffff",
+          "831e8bfffffffff",
+          "833f24fffffffff",
+          "833f26fffffffff",
+          "831e8afffffffff",
+          "831ea3fffffffff",
+          "831ea5fffffffff",
+          "831ea0fffffffff",
+          "833facfffffffff",
+          "833f12fffffffff",
+          "83384afffffffff",
+          "833968fffffffff",
+          "833f34fffffffff",
+          "831e85fffffffff",
+          "831e81fffffffff",
+          "833954fffffffff",
+          "833973fffffffff",
+          "833835fffffffff",
+          "833834fffffffff",
+          "83391afffffffff",
+          "831e94fffffffff",
+          "831e96fffffffff",
+          "831eb0fffffffff",
+          "831f9bfffffffff",
+          "833919fffffffff",
+          "833918fffffffff",
+          "833824fffffffff",
+          "833823fffffffff",
+          "83382efffffffff",
+          "833863fffffffff",
+          "83386afffffffff",
+          "83386efffffffff",
+          "833875fffffffff",
+          "833862fffffffff") %>% 
+  tibble::as.tibble()
+
+#add missing
+med_h3_ids_vec=med_h3_ids_vec %>% 
+  rbind(missing)
+
+write.csv(med_h3_ids_vec,"h3_polygons.csv",row.names = F)
+```
+
+
+
+# setup the environment using Copernicus log in credentials
+```{r}
+cm <- setupCopernicusEnvironment("schaikin", "Aa123456")
+```
+
+# list available variables names - get complete variable information
+```{r}
+csv_path="C:\\Users\\User\\AppData\\Local\\R\\win-library\\4.3\\CopernicusDownloadeR\\extdata\\CopernicusVariables&Datasets.csv"
+
+listVariables (show="completeList",csv_path =csv_path)
+
+listVariables (csv_path = csv_path)
+```
+
+# Example of using the function to extract one variable for specific location point 
+```{r}
+copernicusData <- extractData(
+  cm = cm,  # Copernicus Marine object from setup function
+  variables = "oxygen",
+  lon = -9.64671906997131, lat = 36.7143279919028,
+  startDate = "2021-01-01", endDate = "2021-01-20",
+  depth = c(0,11),
+  frequency = "daily",
+  data_output = "path_to_data_folder",
+  csv_path = csv_path)  # Path to save data
+```
+
+# Example of using the function to extract multiple variables, large geographic area, while  selecting download path
+```{r}
+copernicusData <- extractData(
+  cm = cm,  # Copernicus Marine object from setup function
+  variables = c("oceanTemperature", "oxygen"),
+  lon =c(-30,10),
+  lat = c(30,45),
+  startDate = "2020-03-01", endDate = "2020-06-20",
+  depth = c(1), 
+  frequency = "monthly",
+  data_output = "path_to_data_folder" )  # Path to save data 
+```
+
+# visualise downloaded data
+```{r}
+library(ncdf4)
+library(terra)
+```
+
+# Set the path for the NetCDF file
+# Replace "path_to_data_folder" with the file path to your downloaded dataset
+```{r}
+ncfile <- "C:\\Users\\User\\Desktop\\research\\Mentoring and colaborations\\Georgous\\MHW_NIS\\path_to_data_folder\\cmems_mod_glo_bgc_my_0.25deg_P1D-m_o2_9.75W_36.75N_0.51-9.82m_2021-01-01-2021-01-20.nc"
+```
+
+# Open the NetCDF file
+```{r}
+nc <- nc_open(ncfile)
+# Print information about the NetCDF file
+print(nc)
+#Import a multi-band NetCDF file
+multi <- rast(ncfile)
+# Print a summary of the multi-band raster
+print(multi)
+# Plot the multi band raster
+plot(multi)
+# Plot the first band (e.g., depth level or first time step)
+plot(multi[[2]], main = "Multi-Band NetCDF Raster: Band 2")
+# save selected bands data as raster 
+writeRaster(multi[[2]], filename = "o2_test.tif", overwrite = TRUE)
+```
+
+
+# DATA POINTS
+```{r}
+coords <- read.csv2("./coords.csv",sep=",",h=F)
+colnames(coords) <- c("country","HEX")
+#coords <- read.csv2("./h3_ids.csv")
+new_h3 <- read.csv2("C:\\Users\\User\\Desktop\\research\\postdoc\\Araujo\\MHWs_project\\R\\MHW_postdoc_project\\h3_ids.csv")
+coords <- data.frame(HEX = new_h3$h3_id)
+
+pol <-h3jsr::cell_to_polygon(coords$HEX)
+h3_range <- as.data.frame(do.call("rbind", lapply(sf::st_geometry(pol), sf::st_bbox)))
+
+nrow(h3_range) == nrow(coords)
+```
+
+# Get Data
+```{r}
+for (coord in 1:nrow(coords)){
+  
+  print(coords[coord,])
+  lat_r <- sort(c(h3_range$ymin[coord],h3_range$ymax[coord]))
+  lon_r <- sort(c(h3_range$xmin[coord],h3_range$xmax[coord]))
+  
+  copernicusData <- extractData(
+    cm = cm,  # Copernicus Marine object from setup function
+    variables = c("oceanTemperature"),
+    lon =lon_r,
+    lat = lat_r,
+    startDate = "1970-01-01", endDate = "2022-01-01",
+    depth = c(0,1800), 
+    frequency = "daily",
+    data_output = "./Daily_Data/" )  # Path to save data 
+  
+    files <- list.files("./Daily_Data/", pattern = "\\.csv$", full.names = TRUE)
+    files_info <- file.info(files)
+    csv_n <- files[which.max(files_info$mtime)]
+    
+    print(paste("Archivo más reciente:", csv_n))
+    
+    csv_i <- read.csv2(csv_n,sep=",")
+    csv_i <- cbind(coords[coord,],csv_i)
+    write.csv2(csv_i,csv_n)
+}
+```
