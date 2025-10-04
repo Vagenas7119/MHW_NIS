@@ -462,6 +462,8 @@ records_mhw_clean <- records_mhw %>% filter(!is.na(annual_c_int))
 # Optional: Visualize the relationship
 
 # Optional: Visualize the relationship
+
+#total records with MHW at the same year
 ggplot(records_mhw_clean, aes(x = annual_c_int, y = total_records)) +
   geom_point(alpha = 0.5) +
   geom_smooth(method = "lm", se = TRUE) +
@@ -469,13 +471,105 @@ ggplot(records_mhw_clean, aes(x = annual_c_int, y = total_records)) +
        title = "Relationship between MHW Intensity and Record Count") +
   theme_minimal()
 
-
+#total records with MHW at the same year
 ggplot(records_mhw_clean, aes(x = log(annual_c_int), y = log(total_records))) +
   geom_point(alpha = 0.5) +
   geom_smooth(method = "lm", se = TRUE) +
   labs(x = "MHW Intensity (C-days)", y = "Number of Records", 
        title = "Relationship between MHW Intensity and Record Count") +
   theme_minimal()
+
+
+#Does the time lag in the heatwave of its hexagon affect the number of records?
+
+
+
+
+
+records_mhw_clean<-filter(records_mhw_clean,annual_c_int>0)
+# Remove the current year's annual_c_int first, then join with lagged years
+records_lag1 <- records_mhw_clean %>%
+  select(-annual_c_int) %>%  # Remove current year MHW data
+  mutate(mhw_year = year_for_join - 1) %>%
+  left_join(
+    annual_c_int_dt %>% 
+      select(h3_id, year_of_mhws, annual_c_int), 
+    by = c("h3_id" = "h3_id", "mhw_year" = "year_of_mhws")
+  ) %>%
+  rename(annual_c_int_lag1 = annual_c_int) %>%
+  filter(!is.na(annual_c_int_lag1))
+
+records_lag2 <- records_mhw_clean %>%
+  select(-annual_c_int) %>%  # Remove current year MHW data
+  mutate(mhw_year = year_for_join - 2) %>%
+  left_join(
+    annual_c_int_dt %>% 
+      select(h3_id, year_of_mhws, annual_c_int), 
+    by = c("h3_id" = "h3_id", "mhw_year" = "year_of_mhws")
+  ) %>%
+  rename(annual_c_int_lag2 = annual_c_int) %>%
+  filter(!is.na(annual_c_int_lag2))
+
+records_lag3 <- records_mhw_clean %>%
+  select(-annual_c_int) %>%  # Remove current year MHW data
+  mutate(mhw_year = year_for_join - 3) %>%
+  left_join(
+    annual_c_int_dt %>% 
+      select(h3_id, year_of_mhws, annual_c_int), 
+    by = c("h3_id" = "h3_id", "mhw_year" = "year_of_mhws")
+  ) %>%
+  rename(annual_c_int_lag3 = annual_c_int) %>%
+  filter(!is.na(annual_c_int_lag3))
+
+# Check the results
+cat("Records with 1-year lag:", nrow(records_lag1), "\n")
+cat("Records with 2-year lag:", nrow(records_lag2), "\n")
+cat("Records with 3-year lag:", nrow(records_lag3), "\n")
+
+# Plot 1: 1-year lag
+p1 <- ggplot(records_lag1, aes(x = log(annual_c_int_lag1 + 1), y = total_records)) +
+  geom_point(alpha = 0.3, color = "blue") +
+  geom_smooth(method = "lm", se = TRUE, color = "darkblue") +
+  labs(
+    x = "MHW Intensity (1 year before) - log(C-days + 1)",
+    y = "Number of Records - log(count + 1)", 
+    title = "Relationship: Records vs MHW Intensity (1-year lag)",
+    subtitle = paste("n =", nrow(records_lag1), "observations")
+  ) +
+  theme_minimal()
+
+# Plot 2: 2-year lag
+p2 <- ggplot(records_lag2, aes(x = log(annual_c_int_lag2 + 1), y = total_records)) +
+  geom_point(alpha = 0.3, color = "green") +
+  geom_smooth(method = "lm", se = TRUE, color = "darkgreen") +
+  labs(
+    x = "MHW Intensity (2 years before) - log(C-days + 1)",
+    y = "Number of Records - log(count + 1)", 
+    title = "Relationship: Records vs MHW Intensity (2-year lag)",
+    subtitle = paste("n =", nrow(records_lag2), "observations")
+  ) +
+  theme_minimal()
+
+# Plot 3: 3-year lag
+p3 <- ggplot(records_lag3, aes(x = log(annual_c_int_lag3 + 1), y = total_records)) +
+  geom_point(alpha = 0.3, color = "red") +
+  geom_smooth(method = "lm", se = TRUE, color = "darkred") +
+  labs(
+    x = "MHW Intensity (3 years before) - log(C-days + 1)",
+    y = "Number of Records - log(count + 1)", 
+    title = "Relationship: Records vs MHW Intensity (3-year lag)",
+    subtitle = paste("n =", nrow(records_lag3), "observations")
+  ) +
+  theme_minimal()
+
+# Display all three plots
+print(p1)
+print(p2)
+print(p3)
+
+
+
+
 
 
 #are there are new hexagons added because of MHWs or is it random?
