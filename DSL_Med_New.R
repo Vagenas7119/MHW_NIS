@@ -1,5 +1,9 @@
 #NEW SET 2025 analysis - MHW combined
 
+
+#### DATA INTRO ####
+
+
 # Required Libraries
 library(terra)        # For spatial operations
 library(tidyverse)    # For data manipulation
@@ -87,6 +91,8 @@ head(agg_data,20)
 annual_c_int_dt <- readRDS("C:/Users/geo_v/Desktop/annual_c_int_dt.rds")
 
 tail(annual_c_int_dt)
+
+#### MOMENTUM PIPELINE (UPDATE) ####
 
 #works
 
@@ -391,9 +397,180 @@ ggplot(cumulative_spread_mean, aes(x = t_step, y = cumulative_time)) +
   theme_bw()
 
 
-#ADD THE SPATIAL ASPECT
 
-#Shahar's file
+#### SHAHAR MWH LAYERS - NOVEL WORK ####
+
+#### LAYERS ####
+
+
+#### ANALYSIS ONLY FOR THE FIRST SIGHTING ####
+
+
+first_records <- agg_data %>%
+  group_by(species, ID) %>%
+  filter(first_area_sighting == min(first_area_sighting)) %>%
+  # If there are multiple records in the same first year, keep the first one
+  slice(1) %>%
+  ungroup() %>%
+  arrange(first_area_sighting)
+
+str(first_records)
+
+annual_c_int_dt <- readRDS("C:/Users/geo_v/Desktop/annual_c_int_dt.rds")
+
+str(annual_c_int_dt)
+
+# Option 1: Rename columns to match your code
+first_records_clean <- first_records %>%
+  rename(lat = Latitude, long = Longitude)
+
+str(first_records_clean)
+
+# Option 2: Or modify the code to use your actual column names
+# Associate records with H3 hexagons (resolution 7 is commonly used, adjust as needed)
+# Convert species data to H3 resolution 3 to match MHW data
+# Convert species data to H3 resolution 3 to match MHW data
+first_records_with_hex <- first_records %>%
+  mutate(
+    h3_id = h3jsr::point_to_cell(
+      sf::st_as_sf(., coords = c("Longitude", "Latitude"), crs = 4326),
+      res = 3  # Match the MHW data resolution
+    ),
+    # Create year column that matches year_of_records in MHW data
+    year_for_join = first_area_sighting
+  )
+
+str(first_records_with_hex)
+
+# Join species data with MHW data
+first_combined_data <- first_records_with_hex %>%
+  left_join(annual_c_int_dt, by = c("h3_id" = "h3_id", "year_for_join" = "year_of_mhws"))
+
+str(first_combined_data)
+
+# Calculate total records per hexagon per year with MHW data
+first_records_mhw <- first_combined_data %>%
+  group_by(h3_id, year_for_join, annual_c_int,ID,first_area_sighting) %>%
+  summarise(
+    total_records = n(),
+    .groups = 'drop'
+  )
+
+str(first_records_mhw)
+
+# Remove rows with NA MHW data
+first_records_mhw <- first_records_mhw %>% filter(!is.na(annual_c_int))
+
+#### RECORDS ~ Cumulative Annual MHW ####
+
+# Summarize by hexagon - average MHW intensity vs total first records
+hexagon_summary <- first_records_mhw %>%
+  group_by(h3_id) %>%
+  summarise(
+    mean_annual_c_int = mean(annual_c_int, na.rm = TRUE),
+    total_first_records = sum(total_records),
+    n_species = n_distinct(ID),
+    .groups = 'drop'
+  )
+
+print("Hexagon summary:")
+print(hexagon_summary)
+
+# Plot: MHW intensity vs total first records per hexagon
+ggplot(hexagon_summary, aes(x = mean_annual_c_int, y = total_first_records)) +
+  geom_point(aes(size = n_species), alpha = 0.6, color = "blue") +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  labs(
+    x = "Mean MHW Intensity (C-days) per Hexagon",
+    y = "Total First Records per Hexagon", 
+    title = "Relationship between MHW Intensity and First Records (by Hexagon)",
+    subtitle = "Point size represents number of unique species",
+    size = "Number of\nSpecies"
+  ) +
+  theme_minimal()
+
+# Alternative: Use total MHW intensity instead of mean
+hexagon_summary_total <- first_records_mhw %>%
+  group_by(h3_id) %>%
+  summarise(
+    total_annual_c_int = sum(annual_c_int, na.rm = TRUE),
+    total_first_records = sum(total_records),
+    n_species = n_distinct(ID),
+    .groups = 'drop'
+  )
+
+# Plot with total MHW intensity
+ggplot(hexagon_summary_total, aes(x = total_annual_c_int, y = total_first_records)) +
+  geom_point(aes(size = n_species), alpha = 0.6, color = "darkgreen") +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  labs(
+    x = "Total MHW Intensity (C-days) per Hexagon",
+    y = "Total First Records per Hexagon", 
+    title = "Relationship: Total MHW Intensity vs First Records (by Hexagon)",
+    subtitle = "Point size represents number of unique species",
+    size = "Number of\nSpecies"
+  ) +
+  theme_minimal()
+
+# Calculate correlation
+cor_mean <- cor(hexagon_summary$mean_annual_c_int, hexagon_summary$total_first_records, use = "complete.obs")
+cor_total <- cor(hexagon_summary_total$total_annual_c_int, hexagon_summary_total$total_first_records, use = "complete.obs")
+
+cat("Correlation coefficients:\n")
+cat("Mean MHW intensity vs records:", round(cor_mean, 3), "\n")
+cat("Total MHW intensity vs records:", round(cor_total, 3), "\n")
+
+# Optional: Create a spatial map of this relationship
+hexagon_sf <- hexagon_summary %>%
+  mutate(geometry = h3jsr::cell_to_polygon(h3_id)) %>%
+  st_as_sf()
+
+
+library(h3jsr)
+library(viridis)
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+# Get background maps
+world <- ne_countries(scale = "medium", returnclass = "sf")
+ocean <- ne_download(scale = "medium", type = 'ocean', category = 'physical', returnclass = "sf")
+
+# Get bounding box for focused mapping
+hex_bbox <- st_bbox(hexagon_sf)
+
+# Create spatial map with custom color scaling
+ggplot() +
+  # Background maps
+  geom_sf(data = ocean, fill = "grey99", color = NA, alpha = 0.3) +
+  geom_sf(data = world, fill = "grey85", size = 0.2) +
+  # Hexagons with fill = first records and size = mean MHW intensity
+  geom_sf(data = hexagon_sf, 
+          aes(fill = total_first_records,alpha=0.8, 
+              size = mean_annual_c_int), 
+          color = "grey50") +
+  scale_fill_gradientn(
+    name = "Total First Records", 
+    colors = c("#FFF5EB", "#FEE6CE", "#FDD0A2", "#FDAE6B", "#FD8D3C", "#F16913", "#D94801", "#A63603", "#7F2704")
+  ) +
+  scale_size_continuous(
+    name = "Mean MHW\nIntensity",
+    range = c(0.5, 3)
+  ) +
+  labs(
+    title = "Spatial Distribution: First Records and MHW Intensity",
+    subtitle = "Fill color: Total First Records | Point size: Mean MHW Intensity"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    axis.text = element_blank()
+  ) +
+  coord_sf(
+    xlim = c(hex_bbox$xmin, hex_bbox$xmax),
+    ylim = c(hex_bbox$ymin, hex_bbox$ymax)
+  )
+
+#### ANALYSIS FOR ALL THE RECORDS ####
 
 # Data Aggregation (First Sighting per Species-Country) with proper ordering
 agg_data <- valid_coords %>%
@@ -406,17 +583,14 @@ agg_data <- valid_coords %>%
   mutate(ID = as.numeric(factor(species))) %>%  # Create species ID
   arrange(species, first_area_sighting)  # Then arrange by species and year
 
+str(agg_data)
+
 # Verify the results
 head(agg_data,20)
 
 annual_c_int_dt <- readRDS("C:/Users/geo_v/Desktop/annual_c_int_dt.rds")
 
 str(annual_c_int_dt)
-
-#NEED TO BE SOLVED
-
-# First, make sure your column names are consistent
-# Your data shows "Longitude" but your code uses "long" - let's fix that
 
 # Option 1: Rename columns to match your code
 agg_data_clean <- agg_data %>%
@@ -459,9 +633,9 @@ str(records_mhw)
 # Remove rows with NA MHW data
 records_mhw_clean <- records_mhw %>% filter(!is.na(annual_c_int))
 
-# Optional: Visualize the relationship
 
-# Optional: Visualize the relationship
+#### RECORDS ~ Cumulative Annual MHW ####
+
 
 #total records with MHW at the same year
 ggplot(records_mhw_clean, aes(x = annual_c_int, y = total_records)) +
@@ -471,7 +645,7 @@ ggplot(records_mhw_clean, aes(x = annual_c_int, y = total_records)) +
        title = "Relationship between MHW Intensity and Record Count") +
   theme_minimal()
 
-#total records with MHW at the same year
+#total records with MHW at the same year # ALL
 ggplot(records_mhw_clean, aes(x = log(annual_c_int), y = log(total_records))) +
   geom_point(alpha = 0.5) +
   geom_smooth(method = "lm", se = TRUE) +
@@ -480,10 +654,95 @@ ggplot(records_mhw_clean, aes(x = log(annual_c_int), y = log(total_records))) +
   theme_minimal()
 
 
+#plots
+
+#### HEXAGON-LEVEL ANALYSIS ####
+
+# Summarize by hexagon - total records vs MHW intensity per hexagon
+hexagon_summary <- records_mhw_clean %>%
+  group_by(h3_id) %>%
+  summarise(
+    total_records_hexagon = sum(total_records),
+    mean_annual_c_int = mean(annual_c_int, na.rm = TRUE),
+    total_annual_c_int = sum(annual_c_int, na.rm = TRUE),
+    n_years = n_distinct(year_for_join),
+    n_species = n_distinct(ID),
+    .groups = 'drop'
+  )
+
+print("Hexagon summary:")
+print(hexagon_summary)
+
+# Plot 1: Mean MHW intensity vs total records per hexagon (linear scale)
+ggplot(hexagon_summary, aes(x = mean_annual_c_int, y = total_records_hexagon)) +
+  geom_point(aes(size = n_species), alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  scale_color_viridis_c(name = "Number of Years") +
+  scale_size_continuous(name = "Number of Species") +
+  labs(
+    x = "Mean MHW Intensity (C-days) per Hexagon",
+    y = "Total Records per Hexagon", 
+    title = "Relationship: MHW Intensity vs Total Records (by Hexagon)",
+    subtitle = "Each point represents one hexagon"
+  ) +
+  theme_minimal()
+
+# Plot 2: Total MHW intensity vs total records per hexagon (linear scale)
+ggplot(hexagon_summary, aes(x = total_annual_c_int, y = total_records_hexagon)) +
+  geom_point(aes(size = n_species), alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  scale_color_viridis_c(name = "Number of Years") +
+  scale_size_continuous(name = "Number of Species") +
+  labs(
+    x = "Total MHW Intensity (C-days) per Hexagon",
+    y = "Total Records per Hexagon", 
+    title = "Relationship: Total MHW Intensity vs Total Records (by Hexagon)",
+    subtitle = "Each point represents one hexagon"
+  ) +
+  theme_minimal()
+
+# Plot 3: Log-scale version (mean MHW intensity)
+ggplot(hexagon_summary, aes(x = log(mean_annual_c_int + 1), y = log(total_records_hexagon + 1))) +
+  geom_point(aes(size = n_species), alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  scale_color_viridis_c(name = "Number of Years") +
+  scale_size_continuous(name = "Number of Species") +
+  labs(
+    x = "Mean MHW Intensity - log(C-days + 1) per Hexagon",
+    y = "Total Records - log(count + 1) per Hexagon", 
+    title = "Relationship: MHW Intensity vs Total Records (by Hexagon, log scale)",
+    subtitle = "Each point represents one hexagon"
+  ) +
+  theme_minimal()
+
+# Plot 4: Log-scale version (total MHW intensity)
+ggplot(hexagon_summary, aes(x = log(total_annual_c_int + 1), y = log(total_records_hexagon + 1))) +
+  geom_point(aes(size = n_species), alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  scale_color_viridis_c(name = "Number of Years") +
+  scale_size_continuous(name = "Number of Species") +
+  labs(
+    x = "Total MHW Intensity - log(C-days + 1) per Hexagon",
+    y = "Total Records - log(count + 1) per Hexagon", 
+    title = "Relationship: Total MHW Intensity vs Total Records (by Hexagon, log scale)",
+    subtitle = "Each point represents one hexagon"
+  ) +
+  theme_minimal()
+
+# Calculate correlations for hexagon-level analysis
+cor_mean_hex <- cor(hexagon_summary$mean_annual_c_int, hexagon_summary$total_records_hexagon, use = "complete.obs")
+cor_total_hex <- cor(hexagon_summary$total_annual_c_int, hexagon_summary$total_records_hexagon, use = "complete.obs")
+cor_log_mean_hex <- cor(log(hexagon_summary$mean_annual_c_int + 1), log(hexagon_summary$total_records_hexagon + 1), use = "complete.obs")
+cor_log_total_hex <- cor(log(hexagon_summary$total_annual_c_int + 1), log(hexagon_summary$total_records_hexagon + 1), use = "complete.obs")
+
+cat("Hexagon-level correlation coefficients:\n")
+cat("Mean MHW intensity vs records:", round(cor_mean_hex, 3), "\n")
+cat("Total MHW intensity vs records:", round(cor_total_hex, 3), "\n")
+cat("Log(Mean MHW) vs log(records):", round(cor_log_mean_hex, 3), "\n")
+cat("Log(Total MHW) vs log(records):", round(cor_log_total_hex, 3), "\n")
+
+
 #Does the time lag in the heatwave of its hexagon affect the number of records?
-
-
-
 
 
 records_mhw_clean<-filter(records_mhw_clean,annual_c_int>0)
@@ -566,10 +825,6 @@ p3 <- ggplot(records_lag3, aes(x = log(annual_c_int_lag3 + 1), y = total_records
 print(p1)
 print(p2)
 print(p3)
-
-
-
-
 
 
 #are there are new hexagons added because of MHWs or is it random?
@@ -662,8 +917,6 @@ ggplot(annual_expansion, aes(x = year_for_join)) +
     fill = "MHW Category"
   ) +
   theme_minimal()
-
-
 
 
 # 3. Compare expansion in MHW vs non-MHW years
@@ -800,10 +1053,10 @@ print(p3)
 #remove the 10th percentile of extremes
 
 records_mhw_filtered <- records_mhw_clean #%>%
-  # filter(
-  #   annual_c_int <= quantile(annual_c_int, 0.9, na.rm = TRUE),
-  #   total_records <= quantile(total_records, 0.9, na.rm = TRUE)
-  # )
+# filter(
+#   annual_c_int <= quantile(annual_c_int, 0.9, na.rm = TRUE),
+#   total_records <= quantile(total_records, 0.9, na.rm = TRUE)
+# )
 
 ggplot(records_mhw_filtered, aes(x = log(annual_c_int), y = log(total_records))) +
   geom_point(alpha = 0.5) +
@@ -820,6 +1073,7 @@ hexagon_summary <- records_mhw_clean %>%
   summarise(
     mean_records = mean(total_records, na.rm = TRUE),
     mean_mhw = mean(annual_c_int, na.rm = TRUE),
+    sum_records= sum(total_records, na.rm = TRUE),
     n_years = n_distinct(year_for_join),
     .groups = 'drop'
   )
@@ -837,11 +1091,9 @@ hexagons_sf <- hex_polygons_df %>%
 
 # Plot by record density
 ggplot(hexagons_sf) +
-  geom_sf(aes(fill = mean_records), color = "white", size = 0.1) +
+  geom_sf(aes(fill = sum_records), color = "white", size = 0.1) +
   scale_fill_viridis_c(
-    name = "Mean Records",
-    trans = "log10",
-    labels = scales::comma
+    name = "Total Records"
   ) +
   labs(
     title = "Spatial Distribution of Biodiversity Records",
@@ -891,13 +1143,12 @@ ggplot() +
   # Your hexagons with transparency
   geom_sf(data = hexagons_sf, aes(fill = mean_records), 
           color = "white", size = 0.1, alpha = 0.4) +
-  scale_fill_viridis_c(
+  scale_fill_gradientn(
     name = "Mean Records",
-    trans = "log10",
-    labels = scales::comma
-  ) +
+    colors = c("#FFF5EB", "#FEE6CE", "#FDD0A2", "#FDAE6B", "#FD8D3C", "#F16913", "#D94801", "#A63603", "#7F2704")
+  )  +
   labs(
-    title = "Spatial Distribution of Biodiversity Records",
+    title = "Spatial Distribution of NIS Records",
     subtitle = "Mean records per hexagon across all years"
   ) +
   theme_minimal() +
@@ -916,21 +1167,19 @@ ggplot() +
 # Plot with background cropped to hexagon extent
 ggplot() +
   # Ocean background (light grey) - crop to hexagon extent
-  geom_sf(data = ocean, fill = "grey99", color = NA) +
+  geom_sf(data = ocean, fill = "grey90", color = NA) +
   # Land (darker grey) - crop to hexagon extent
-  geom_sf(data = world, fill = "grey90", size = 0.2) +
-  # Your hexagons with orange-red palette
-  geom_sf(data = hexagons_sf, aes(fill = mean_records), 
-          color = "white", size = 0.1, alpha = 0.6) +
+  geom_sf(data = world, fill = "grey80",size = 0.2) +
+  # Your hexagons with transparency
+  geom_sf(data = hexagons_sf, aes(fill = sum_records), 
+          color = "white", size = 0.1, alpha = 0.4) +
   scale_fill_gradientn(
-    name = "Mean Records",
-    colors = c("#FFF5EB", "#FEE6CE", "#FDD0A2", "#FDAE6B", "#FD8D3C", "#F16913", "#D94801", "#A63603", "#7F2704"),
-    trans = "log10",
-    labels = scales::comma
-  ) +
+    name = "Total Records",
+    colors = c("#FFF5EB", "#FEE6CE", "#FDD0A2", "#FDAE6B", "#FD8D3C", "#F16913", "#D94801", "#A63603", "#7F2704")
+  )  +
   labs(
-    title = "Spatial Distribution of Biodiversity Records",
-    subtitle = "Mean NIS records per hexagon across all years"
+    title = "Spatial Distribution of NIS Records",
+    subtitle = "Total records per hexagon across all years"
   ) +
   theme_minimal() +
   theme(
@@ -945,9 +1194,6 @@ ggplot() +
 
 
 #Lets work on the momentum a bit
-
-
-
 
 
 
@@ -1131,9 +1377,6 @@ ggplot() +
 
 
 
-
-
-
 # Create figures for all t_steps from 0 to 10
 for (t_step_value in 0:10) {
   
@@ -1259,18 +1502,10 @@ print(summary_plot)
 
 
 
-
-
-
-
 ###############
 
 
 #find sequences in the polygons#
-
-
-
-
 
 
 
