@@ -1494,6 +1494,48 @@ summary_plot <- ggplot(t_step_summary, aes(x = t_step, y = n_introductions)) +
   ) +
   theme_minimal()
 
+
+# Create a summary plot showing trends across t_steps
+# Create a summary plot showing trends across t_steps
+summary_plot <- ggplot(t_step_summary, aes(x = as.factor(t_step), y = n_introductions)) +
+  geom_line(aes(group = 1), color = "#2E86AB", size = 1.2, alpha = 0.8) +  # Add group = 1 for line to work with factors
+  geom_point(color = "#A23B72", size = 3, alpha = 0.9) +
+  geom_text(aes(label = n_introductions), vjust = -1, size = 4, fontface = "bold") +
+  scale_x_discrete(
+    name = "Time Step Intervals",
+    labels = c(expression(tau[0]),
+               expression(tau[1]),
+               expression(tau[2]),
+               expression(tau[3]),
+               expression(tau[4]),
+               expression(tau[5]),
+               expression(tau[6]),
+               expression(tau[7]),
+               expression(tau[8]),
+               expression(tau[9]),
+               expression(tau[10]))
+  ) +
+  labs(
+    title = "Number of Introductions Across Time Steps",
+    subtitle = "Tracking introduction patterns over sequential time intervals",
+    y = "Number of Introductions"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5, color = "gray40"),
+    axis.title = element_text(face = "bold", size = 12),
+    axis.title.x = element_text(margin = margin(t = 10)),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    panel.grid.major = element_line(color = "gray90", linewidth = 0.3),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA)
+  ) +
+  # Add some padding for the labels
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.2)))
+
 print(summary_plot)
 
 # Save summary plot
@@ -1505,18 +1547,7 @@ print(summary_plot)
 ###############
 
 
-#find sequences in the polygons#
-
-
-
-
-
-# Find sequential hexagon movements for each species
-
-
-
-
-
+#### HUBS INITIAL  ####
 
 
 # Load required libraries
@@ -1585,27 +1616,36 @@ hex_bbox <- st_bbox(hub_sf)
 
 # 5. Visualize hub hexagons
 hub_plot <- ggplot() +
-  # Background maps
-  geom_sf(data = ocean, fill = "grey95", color = NA) +
-  geom_sf(data = world, fill = "grey85", color = "grey70", size = 0.1) +
-  # Hub hexagons colored by outgoing connections
+  # Ocean background (light grey) - crop to hexagon extent
+  geom_sf(data = ocean, fill = "grey90", color = NA) +
+  # Land (darker grey) - crop to hexagon extent
+  geom_sf(data = world, fill = "grey80", size = 0.2) +
+  # Hub hexagons colored by outgoing connections with transparency
   geom_sf(data = hub_sf, aes(fill = out_degree), 
-          color = "white", size = 0.2, alpha = 0.8) +
+          color = "white", size = 0.1, alpha = 0.8) +
   # Labels for top hubs (top 20%)
   geom_sf_text(data = hub_sf %>% filter(out_degree >= quantile(out_degree, 0.8)),
                aes(label = out_degree),
                color = "white", size = 3, fontface = "bold") +
-  scale_fill_viridis_c(
+  scale_fill_gradientn(
     name = "Outgoing\nConnections",
-    option = "plasma"
+    colors = c("#FFF5EB", "#FEE6CE", "#FDD0A2", "#FDAE6B", "#FD8D3C", "#F16913", "#D94801", "#A63603", "#7F2704")
   ) +
   labs(
     title = "Hub Hexagons in Species Movement Network",
     subtitle = "Higher values indicate more outgoing connections to other hexagons",
-    caption = "Numbers show count of unique outgoing connections"
+    caption = "Numbers show count of unique outgoing connections for the top 20% of Hubs"
   ) +
   theme_minimal() +
-  theme(axis.text = element_blank()) +
+  theme(
+    axis.text = element_blank(),
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    plot.subtitle = element_text(size = 10, hjust = 0.5, color = "gray40"),
+    plot.caption = element_text(size = 8, color = "gray50"),
+    legend.position = "right",
+    legend.title = element_text(face = "bold", size = 10),
+    legend.text = element_text(size = 8)
+  ) +
   coord_sf(
     xlim = c(hex_bbox$xmin, hex_bbox$xmax),
     ylim = c(hex_bbox$ymin, hex_bbox$ymax)
@@ -1637,6 +1677,9 @@ for(i in 1:nrow(top_hubs)) {
 #write_csv(hub_hexagons, "hub_hexagons_analysis.csv")
 #ggsave("hub_hexagons_map.png", hub_plot, width = 10, height = 8, dpi = 300)
 
+
+
+##### HUBS #####
 
 
 ######### Check if the outgoing connection is related to a marine heatwave
@@ -1732,33 +1775,6 @@ hub_movement_mhw <- movement_mhw_analysis %>%
 print("Hub-specific MHW movement patterns:")
 print(hub_movement_mhw)
 
-# 7. Visualize hubs with MHW context
-hub_sf_mhw <- hub_sf %>%
-  left_join(hub_mhw_analysis, by = "from_hex")
-
-ggplot() +
-  geom_sf(data = ocean, fill = "grey95", color = NA) +
-  geom_sf(data = world, fill = "grey85", color = "grey70", size = 0.1) +
-  geom_sf(data = hub_sf_mhw, aes(fill = mean_mhw_intensity), 
-          color = "white", size = 0.2, alpha = 0.8) +
-  geom_sf_text(data = hub_sf_mhw %>% filter(out_degree >= quantile(out_degree, 0.8)),
-               aes(label = paste(out_degree, "\n", round(mean_mhw_intensity, 1))),
-               color = "white", size = 2.5, fontface = "bold") +
-  scale_fill_viridis_c(
-    name = "Mean MHW\nIntensity\n(°C-days)",
-    option = "plasma"
-  ) +
-  labs(
-    title = "Hub Hexagons: Connectivity and Marine Heatwave Intensity",
-    subtitle = "Numbers show: outgoing connections | mean MHW intensity",
-    caption = "Higher MHW intensity may influence species dispersal patterns"
-  ) +
-  theme_minimal() +
-  theme(axis.text = element_blank()) +
-  coord_sf(
-    xlim = c(hex_bbox$xmin, hex_bbox$xmax),
-    ylim = c(hex_bbox$ymin, hex_bbox$ymax)
-  )
 
 # 8. Statistical tests
 # Test if hubs with more connections have different MHW characteristics
@@ -1806,7 +1822,7 @@ ggplot(hub_mhw_temporal, aes(x = year_of_mhws, y = mean_mhw_hubs)) +
 
 
 
-###
+### HUBS ####
 
 
 #break down the hubs annually
@@ -1903,46 +1919,6 @@ ggplot(annual_top_hubs, aes(x = from_year)) +
   theme_minimal() +
   theme(legend.position = "bottom")
 
-# 7. Yearly hub network visualization
-# Create annual hub maps for key years
-key_years <- seq(min(annual_hub_mhw$from_year, na.rm = TRUE), 
-                 max(annual_hub_mhw$from_year, na.rm = TRUE), by = 5)  # Every 5 years
-
-for(year in key_years) {
-  annual_data <- annual_hub_mhw %>%
-    filter(from_year == year) %>%
-    mutate(geometry = h3jsr::cell_to_polygon(from_hex)) %>%
-    st_as_sf()
-  
-  if(nrow(annual_data) > 0) {
-    p <- ggplot() +
-      geom_sf(data = ocean, fill = "grey95", color = NA) +
-      geom_sf(data = world, fill = "grey85", color = "grey70", size = 0.1) +
-      geom_sf(data = annual_data, aes(fill = annual_out_degree), 
-              color = "white", size = 0.2, alpha = 0.8) +
-      geom_sf_text(data = annual_data %>% filter(annual_out_degree >= quantile(annual_out_degree, 0.8, na.rm = TRUE)),
-                   aes(label = annual_out_degree),
-                   color = "white", size = 3, fontface = "bold") +
-      scale_fill_viridis_c(
-        name = "Annual\nOutgoing\nConnections",
-        option = "plasma"
-      ) +
-      labs(
-        title = paste("Hub Connectivity Network in", year),
-        subtitle = paste("MHW intensity range:", round(min(annual_data$annual_mhw_intensity, na.rm = TRUE), 1), 
-                         "to", round(max(annual_data$annual_mhw_intensity, na.rm = TRUE), 1), "°C-days")
-      ) +
-      theme_minimal() +
-      theme(axis.text = element_blank()) +
-      coord_sf(
-        xlim = c(hex_bbox$xmin, hex_bbox$xmax),
-        ylim = c(hex_bbox$ymin, hex_bbox$ymax)
-      )
-    
-    print(p)
-    ggsave(paste0("hub_network_", year, ".png"), p, width = 10, height = 8, dpi = 300)
-  }
-}
 
 # 8. MHW events and connectivity spikes
 mhw_events_analysis <- annual_hub_mhw %>%
@@ -1997,8 +1973,4 @@ annual_summary <- annual_hub_mhw %>%
 print("Annual summary of hub network and MHW conditions:")
 print(annual_summary)
 
-# 11. Save annual analysis results
-#write_csv(annual_hub_mhw, "annual_hub_connectivity_mhw.csv")
-#write_csv(annual_summary, "annual_network_summary.csv")
-#write_csv(annual_correlations, "annual_correlations_analysis.csv")
 
