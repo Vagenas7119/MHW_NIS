@@ -43,6 +43,7 @@ test_climatology = heatwaveR::ts2clm(
   roundClm = 4) %>% 
   mutate(hexagon="831e83fffffffff")
 
+h3_vector=sst_data$h3_id %>% unique
 
 #Estimate climatologies for all hexagons using for loop
 ts2clm_list=list()

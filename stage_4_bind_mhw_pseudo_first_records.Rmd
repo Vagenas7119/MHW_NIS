@@ -15,8 +15,8 @@ library(tidyverse)
 data
 ```{r}
 #trended
-# clim=read_rds("climatology_df_median_sst_10m.rds")
-# events=read_rds("event_df_median_sst_10m.rds")
+ clim=read_rds("climatology_df_median_sst_10m.rds")
+ events=read_rds("event_df_median_sst_10m.rds")
 #detrended
 clim_dt=read_rds("climatology_dt_df.rds")
 events_dt=read_rds("event_dt_df.rds")
@@ -38,6 +38,8 @@ annual_c_int=clim %>%
   group_by(h3_id,year_of_mhws) %>% 
   summarise(annual_c_int=sum(intensity)) %>% 
   mutate(year_of_records=year_of_mhws+1)
+
+write_rds(annual_c_int,"annual_c_int.rds")
 ```
 
 #1.2) Records data
@@ -80,7 +82,7 @@ Plot coords
 world_map <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
 
 # 2. Convert your 'records' data frame to an sf object
-records_sf <- records %>%
+records_sf <- records_min %>%
   drop_na(lat, long) %>% # Remove rows with missing lat/long
   sf::st_as_sf(coords = c("long", "lat"), crs = 4326) # CRS 4326 is WGS84 for lat/long
 
@@ -114,7 +116,7 @@ ggplot() +
 Bind MHWs with the records of the succeeding year
 ```{r}
 c_int_records=annual_c_int %>% 
-  filter()
+    filter(h3_id%in%records_min_count$h3_id %>% unique) %>% 
   left_join(records_min_count,
             by=c("h3_id","year_of_records")) %>% 
   mutate(records = replace_na(records, 0)) %>% 
@@ -140,8 +142,10 @@ ggplot(c_int_records)+
 library(glmmTMB)
 
 #nbinom2
-test2=glmmTMB(data = c_int_records,formula = records~annual_c_int+(1|h3_id),family = "nbinom2")
+test2=glmmTMB(data = c_int_records,formula = records~annual_c_int+(1|h3_id),family = "nbinom2",weights = weights)
 summary(test2)
+performance::check_singularity(test2)
+performance::check_convergence(test2)
 sjPlot::plot_model(test2,type="eff",terms="annual_c_int",show.data = F)+
   theme_bw()
 plot(DHARMa::simulateResiduals(test2))
@@ -155,6 +159,69 @@ sjPlot::plot_model(test3,type="eff",terms="annual_c_int",show.data = F)
 plot(DHARMa::simulateResiduals(test3))
 MuMIn::r.squaredGLMM(test3)
 AIC(test3)
+```
+
+Extract predicted of the best model
+```{r}
+test2_gg=ggeffects::ggpredict(test2,terms="annual_c_int[0:381 by=1]")
+```
+
+Plot
+```{r}
+# 1. Extract the p-value for 'annual_c_int'
+# The p-value is in the fixed effects part of the model summary.
+p_value <- summary(test2)$coefficients$cond["annual_c_int", "Pr(>|z|)"]
+
+# 2. Extract the sample size (number of observations)
+N <- nobs(test2)
+
+# 3. Create a formatted label string
+# Format the p-value to a specific number of decimal places (e.g., 3)
+p_label <- paste0("p-value ", format.pval(p_value, digits = 3, eps = 0.001))
+N_label <- paste0("n = ", N)
+
+# 4. Determine the position for the labels
+# These coordinates are illustrative; adjust them to fit your plot data.
+# Assuming x is from 0 to about 120 and y is on a log scale (say max 1000).
+x_pos <- max(c_int_records_dt$annual_c_int, na.rm = TRUE) * 0.95 # Near top-right
+y_pos_p <- max(c_int_records_dt$records, na.rm = TRUE) * 0.95 
+y_pos_N <- max(c_int_records_dt$records, na.rm = TRUE) * 0.7 # Adjust vertical separation on log scale
+
+# Convert y_pos to a single data frame for geom_text/annotate if preferred
+stats_df <- data.frame(
+  x = c(x_pos, x_pos),
+  y = c(y_pos_p, y_pos_N),
+  label = c(p_label, N_label)
+)
+
+#plot
+test2_p=ggplot()+
+  geom_point(data=c_int_records,
+             aes(x=annual_c_int,y=records),
+             color="grey",
+             alpha=0.5)+
+  geom_ribbon(data=test2_gg,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3)+
+  geom_line(data=test2_gg,
+            aes(x=x,y=predicted))+
+  scale_fill_gradient(low = "grey70", high = "red", guide = "none") +
+  theme_bw()+
+  #scale_y_log10()+
+  labs(x="Annual cumulative intensity (°C-days)",
+       y="New records within the analysis period") +
+  #coord_cartesian(ylim=c(0,3))+
+  # Add the labels using annotate() for fixed positions
+  annotate("text", x = 381, y = 16, 
+           label = p_label, 
+           hjust = 1, vjust = 1, size = 4) +
+  annotate("text", x = 381, y = 14, 
+           label = N_label, 
+           hjust = 1, vjust = 1, size = 4)+
+  ggbreak::scale_y_break(breaks=c(2,3),scales = c(2,0.5))+
+  scale_y_continuous(breaks=c(0,1,2,5,10,15,20))
+test2_p
+ggsave(filename ="test2_p.png" ,plot =test2_p ,device = "jpeg",units = "cm",width = 15,height = 10)
 ```
 
 #2.1) detrended cumulative intensity
@@ -215,11 +282,14 @@ library(glmmTMB)
 test2_dt=glmmTMB(data = c_int_records_dt,formula = records~annual_c_int+(1|h3_id),family = "nbinom2",
                  weights = weights)
 summary(test2_dt)
+performance::check_singularity(test2_dt)
+performance::check_convergence(test2_dt)
 sjPlot::plot_model(test2_dt,type="eff",terms="annual_c_int",show.data = F)+
   theme_bw()
 plot(DHARMa::simulateResiduals(test2_dt))
 MuMIn::r.squaredGLMM(test2_dt)
 AIC(test2_dt)
+
 #nbinom
 test3_dt=glmmTMB(data = c_int_records_dt,
                  formula = records~annual_c_int+(1|h3_id),
@@ -236,7 +306,7 @@ AIC(test3_dt)
 
 Extract predicted of the best model
 ```{r}
-test3_dt_gg=ggeffects::ggpredict(test3_dt,terms="annual_c_int[0:965 by=1]")
+test3_dt_gg=ggeffects::ggpredict(test3_dt,terms="annual_c_int[0:212 by=1]")
 ```
 
 Plot
@@ -285,10 +355,10 @@ test3_dt_p=ggplot()+
        y="New records within the analysis period") +
   #coord_cartesian(ylim=c(0,3))+
   # Add the labels using annotate() for fixed positions
-  annotate("text", x = 950, y = 16, 
+  annotate("text", x = 210, y = 16, 
            label = p_label, 
            hjust = 1, vjust = 1, size = 4) +
-  annotate("text", x = 950, y = 14, 
+  annotate("text", x = 210, y = 14, 
            label = N_label, 
            hjust = 1, vjust = 1, size = 4)+
   ggbreak::scale_y_break(breaks=c(1,2),scales = c(2,0.5))+

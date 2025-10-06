@@ -46,7 +46,7 @@ med_test <-
     variable      = c("thetao"),
     region        = c(30, 32, 31, 33),
     timerange     = c("1987-01-01 UTC", "2024-12-31 UTC"),
-    verticalrange = c(-10.6:-1.001),
+    verticalrange = c(-10.6,-1.001),
     progress      = T
 )
 med_test
@@ -101,7 +101,6 @@ if (!dir.exists(output_dir)) {
   dir.create(output_dir)}
 ```
 
-For some reason this step reduces the days in time series. Investigate more
 ```{r}
 # --- Function to download and save data for a single hexagon ---
 download_and_save_hexagon <- function(h3_id) {
