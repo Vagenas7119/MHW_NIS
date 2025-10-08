@@ -936,6 +936,7 @@ Plot proxy to monitoring effort
 ```{r}
 # 2. Convert H3 IDs to Spatial Polygons (sf object)
 ormef_sf <- ormef_h3_id %>%
+  filter(h3_id%in%intersect(filtered_data_before_first_record_dt_sst$h3_id %>% unique(),ormef_h3_id_year$h3_id %>% unique)) %>% 
   # Pass the entire data frame and specify the H3 column name
   h3jsr::cell_to_polygon(
     input = .,               # '.' refers to the incoming data frame
@@ -960,7 +961,7 @@ h3_map <- ggplot() +
     alpha = 0.8          
   ) +
   # Add land boundaries first 
-  geom_sf(data = world, fill = "antiquewhite", color = "black", linewidth = 0.1) +
+  geom_sf(data = world, fill = "#B8D380", color = "black", linewidth = 0.1) +
   # Customize the color scale (from ggplot2 / viridis package, which tidyverse uses)
   scale_fill_viridis_c(
     name = "Number of Sources",
@@ -976,16 +977,19 @@ h3_map <- ggplot() +
 
   # Apply a clean theme and labels
   labs(
-    title = "Unique sources for Lessepsian records",
+    title = "A) Spatial distribution of sources",
     x = "Longitude",
     y = "Latitude"
   ) +
   theme_minimal() +
   theme(
-    legend.position = "right",
-    panel.grid.major = element_line(color = "gray80", linewidth = 0.2),
-    plot.title = element_text(hjust = 0.5),
-    plot.subtitle = element_text(hjust = 0.5),
+# --- CHANGE IS HERE ---
+ # Moves the legend inside the plot using (x, y) coordinates
+legend.position = c(0.22, 0.17),
+# Optional: Makes the legend background transparent
+legend.background = element_rect(fill = "transparent", color = NA),
+legend.key.size = unit(0.25, "cm"),
+panel.grid.major = element_line(color = "gray80", linewidth = 0.2),
     panel.background = element_rect(fill = "skyblue", color = NA) 
   )
 h3_map
@@ -1010,14 +1014,41 @@ filtered_data_before_first_record_dt_sst_meff=
   mutate(sources=case_when(is.na(sources)~0,
                            TRUE~sources))
 
-ggplot(filtered_data_before_first_record_dt_sst_meff)+
-  geom_point(aes(x=year_of_records,y=sources))
+source_temp=ggplot(filtered_data_before_first_record_dt_sst_meff %>% 
+                     ungroup() %>% 
+                     distinct(h3_id,year_of_records,sources))+
+  geom_jitter(aes(x=year_of_records,y=sources),height = 0.1)+
+  #geom_violin(aes(x=year_of_records,y=sources,group=year_of_records))+
+  theme_bw()+
+  labs(x="Year",y="Sources",title="B) Temporal trend")
+source_temp
+ggplot(filtered_data_before_first_record_dt_sst_meff %>% 
+         mutate(points=h3jsr::cell_to_point(h3_id)))+
+  geom_point(aes(x=year_of_records,y=sources))+
+  theme_bw()+
+  labs(x="Year",y="Sources",title="A) Temporal trend")
 
 cor.test(filtered_data_before_first_record_dt_sst_meff$sources,filtered_data_before_first_record_dt_sst_meff$year_of_mhws)
 
 #species
 filtered_data_before_first_record_dt_sst_meff$species %>% unique
 ```
+
+bias grid
+```{r}
+bias_grid=gridExtra::grid.arrange(
+  h3_map,
+                        source_temp,
+  layout_matrix = rbind(c(1, 1,1,1,1),
+                        c(1, 1,1,1,1),
+                        c(1, 1,1,1,1),# Row 1: P1 and P2
+                        c(NA,2,2,2,NA),
+                        c(NA,2,2,2,NA)))
+
+bias_grid
+ggsave(filename ="bias_grid.png" ,plot =bias_grid ,device = "jpeg",units = "cm",width = 20,height = 15)
+```
+
 
 Test
 ```{r}
@@ -1130,117 +1161,4 @@ test_sp_dt_time_sst_mon_eff_grid=gridExtra::grid.arrange(left="Probability of re
 
 test_sp_dt_time_sst_mon_eff_grid
 ggsave(filename ="test_sp_dt_time_sst_mon_eff_grid.png" ,plot =test_sp_dt_time_sst_mon_eff_grid ,device = "jpeg",units = "cm",width = 20,height = 15)
-```
-
-###monitoring effort control - no time
-Test
-```{r}
-test_sp_dt_time_sst_mon_eff_n_time=glmmTMB(
-  data = filtered_data_before_first_record_dt_sst_meff,
-  formula = records~scale(sources)+scale(annual_c_int)+scale(median_sst)+(1|h3_id/year_of_mhws)+(1|species),
-  family = "binomial")#,
-  #control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
-
-summary(test_sp_dt_time_sst_mon_eff_n_time)
-plot(DHARMa::simulateResiduals(test_sp_dt_time_sst_mon_eff_n_time))
-performance::check_singularity(test_sp_dt_time_sst_mon_eff_n_time)
-performance::check_convergence(test_sp_dt_time_sst_mon_eff_n_time)
-performance::check_collinearity(test_sp_dt_time_sst_mon_eff_n_time)
-test_sp_dt_time_sst_mon_eff_n_time_r2=MuMIn::r.squaredGLMM(test_sp_dt_time_sst_mon_eff_n_time)
-```
-
-Extract predictions
-```{r}
-test_sp_dt_time_sst_mon_eff_n_time_gg_cint=ggeffects::ggpredict(
-  test_sp_dt_time_sst_mon_eff_n_time,
-  terms=c("annual_c_int [0:183 by =1]"))
-
-test_sp_dt_time_sst_mon_eff_n_time_gg_yr=ggeffects::ggpredict(
-  test_sp_dt_time_sst_mon_eff_n_time,
-  terms=c("year_of_mhws [1987:2022 by =1]"))
-
-test_sp_dt_time_sst_mon_eff_n_time_gg_sst=ggeffects::ggpredict(
-  test_sp_dt_time_sst_mon_eff_n_time,
-  terms=c("median_sst [14:24 by = 0.5]"))
-
-write_rds(test_sp_dt_time_sst_mon_eff_n_time_gg_cint,
-          "test_sp_dt_time_sst_mon_eff_n_time_gg_cint.rds")
-write_rds(test_sp_dt_time_sst_mon_eff_n_time_gg_yr,
-          "test_sp_dt_time_sst_mon_eff_n_time_gg_yr.rds")
-write_rds(test_sp_dt_time_sst_mon_eff_n_time_gg_sst,
-          "test_sp_dt_time_sst_mon_eff_n_time_gg_sst.rds")
-```
-
-Plot
-```{r}
-#c_intensity
-test_sp_dt_time_sst_mon_eff_n_time_cint_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
-  geom_point(aes(x=annual_c_int,y=records),
-             alpha=0.3,
-             color="grey")+
-  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_n_time_gg_cint,
-              aes(x=x,ymin=conf.low,ymax=conf.high),
-              alpha=0.3,
-              fill="#E61316")+
-  geom_line(data=test_sp_dt_time_sst_mon_eff_n_time_gg_cint,
-              aes(x=x,y=predicted),
-            linewidth=1)+
-  labs(x="Annual cumulative intensity (°C-days)",
-       y="Record status",
-       title="C) MHWs")+
-  theme_bw()+
-  theme(axis.title.y = element_blank())
-test_sp_dt_time_sst_mon_eff_n_time_cint_p
-
-#years
-test_sp_dt_time_sst_mon_eff_n_time_yr_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
-  geom_point(aes(x=year_of_mhws,y=records),
-             alpha=0.3,
-             color="grey")+
-  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_n_time_gg_yr,
-              aes(x=x,ymin=conf.low,ymax=conf.high),
-              alpha=0.3,
-              fill="#E61316")+
-  geom_line(data=test_sp_dt_time_sst_mon_eff_n_time_gg_yr,
-              aes(x=x,y=predicted),
-            linewidth=1)+
-  labs(x="Year",
-       y="Record status",
-       title="A) Time")+
-  theme_bw()+
-  theme(axis.title.y = element_blank())
-test_sp_dt_time_sst_mon_eff_n_time_yr_p
-
-#SST
-test_sp_dt_time_sst_mon_eff_n_time_sst_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
-  geom_point(aes(x=median_sst,y=records),
-             alpha=0.3,
-             color="grey")+
-  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_n_time_gg_sst,
-              aes(x=x,ymin=conf.low,ymax=conf.high),
-              alpha=0.3,
-              fill="#E61316")+
-  geom_line(data=test_sp_dt_time_sst_mon_eff_n_time_gg_sst,
-              aes(x=x,y=predicted),
-            linewidth=1)+
-  labs(x="SST (°C)",
-       y="Record status",
-       title="B) SST")+
-  theme_bw()+
-  theme(axis.title.y = element_blank())
-test_sp_dt_time_sst_mon_eff_n_time_sst_p
-```
-
-```{r}
-test_sp_dt_time_sst_mon_eff_n_time_grid=gridExtra::grid.arrange(left="Probability of record occurrence",
-  test_sp_dt_time_sst_mon_eff_n_time_yr_p,
-                        test_sp_dt_time_sst_mon_eff_n_time_sst_p,
-                        test_sp_dt_time_sst_mon_eff_n_time_cint_p,
-                        ncol = 2,
-                        nrow=2,
-  layout_matrix = rbind(c(1, 1,1,1), # Row 1: P1 and P2
-                        c(2,2,3,3)))
-
-test_sp_dt_time_sst_mon_eff_n_time_grid
-ggsave(filename ="test_sp_dt_time_sst_mon_eff_n_time_grid.png" ,plot =test_sp_dt_time_sst_mon_eff_n_time_grid ,device = "jpeg",units = "cm",width = 20,height = 15)
 ```
