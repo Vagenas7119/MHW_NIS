@@ -81,8 +81,40 @@ records=read_csv("records_cleaned.csv") %>%
   #remove marmara and black sea records that are not in the climatic model
   filter(!h3_id%in%c("831ec8fffffffff", "831ec9fffffffff", "832d05fffffffff"))
 
+#Harmonize species
+records_harm=bdc::bdc_query_names_taxadb(
+  unique(records$species),
+  suggest_names = T) %>% 
+  select(original_search,suggested_name,notes,scientificName,family) %>% 
+  mutate(is_similar=original_search==scientificName)
+
+#replace corrected names
+records_harm_corr=records_harm %>% 
+  mutate(
+    scientificName=case_when(
+      original_search%in%"Callionymus filamentosus (Valenciennes, 1837)"~"Callionymus filamentosus",
+      original_search%in%"Cryptocentrus steinhardti"~"Cryptocentrus steinhardti",
+      original_search%in%"Hippocampus kuda ex H.fuscus"~"Hippocampus kuda",
+      original_search%in%"Hippocampus kuda ex H. fuscus"~"Hippocampus kuda",
+      original_search%in%"Parupenaeus forskalii"~"Parupeneus forsskali",
+      original_search%in%"Equulites popei"~"Equulites popei",                                   original_search%in%"Planiliza carinata"~"Planiliza carinata",
+ 
+      TRUE~scientificName)) %>% 
+  filter(!original_search%in%c("Sargocentron sp.",
+                               "Sphyraena chrysotaenia /  flavicauda"))
+
+#Fix the records data
+records_fix=records %>% 
+  left_join(records_harm_corr %>% 
+              rename(species=original_search,
+                     species_corr=scientificName) %>% 
+              select(species,species_corr),
+            by="species") %>% 
+  select(-species) %>% 
+  rename(species=species_corr)
+
 #For every h3_id, year,lat, and long keep only the first record
-records_min=records %>% 
+records_min=records_fix %>% 
   group_by(h3_id,species) %>% 
   filter(year%in%min(year)) %>% 
  #For any remaining groups (h3_id/species) with multiple records in the minimum year, keep only the first one
@@ -96,7 +128,7 @@ records_min_count=records_min %>%
   rename(year_of_records=year)
 
 #records_sp_level
-records_min_sp_level=records %>% 
+records_min_sp_level=records_fix %>% 
   group_by(h3_id,species) %>% 
   filter(year%in%min(year)) %>% 
  #For any remaining groups (h3_id/species) with multiple records in the minimum year, keep only the first one
@@ -204,7 +236,7 @@ final_data_clean <- h3_year_combo_mhw %>%
   ungroup()
 
 ######################################################################
-#Now keep only mhe data preexcisting to the species record in h3_id
+#Now keep only mhw data preexisting to the species record in h3_id
 filtered_data_before_first_record <- final_data_clean %>%
   # 1. Group by the unique identifier pairs
   group_by(h3_id, species) %>%
@@ -497,7 +529,7 @@ final_data_clean_dt <- h3_year_combo_mhw_dt %>%
   ungroup()
 
 ######################################################################
-#Now keep only mhe data preexcisting to the species record in h3_id
+#Now keep only mhw data preexisting to the species record in h3_id
 filtered_data_before_first_record_dt <- final_data_clean_dt %>%
   # 1. Group by the unique identifier pairs
   group_by(h3_id, species) %>%
@@ -1043,7 +1075,8 @@ test_sp_dt_time_sst_mon_eff_cint_p=ggplot(filtered_data_before_first_record_dt_s
   labs(x="Annual cumulative intensity (°C-days)",
        y="Record status",
        title="C) MHWs")+
-  theme_bw()
+  theme_bw()+
+  theme(axis.title.y = element_blank())
 test_sp_dt_time_sst_mon_eff_cint_p
 
 #years
@@ -1058,10 +1091,11 @@ test_sp_dt_time_sst_mon_eff_yr_p=ggplot(filtered_data_before_first_record_dt_sst
   geom_line(data=test_sp_dt_time_sst_mon_eff_gg_yr,
               aes(x=x,y=predicted),
             linewidth=1)+
-  labs(x="Year of MHW | SST",
+  labs(x="Year",
        y="Record status",
        title="A) Time")+
-  theme_bw()
+  theme_bw()+
+  theme(axis.title.y = element_blank())
 test_sp_dt_time_sst_mon_eff_yr_p
 
 #SST
@@ -1079,12 +1113,13 @@ test_sp_dt_time_sst_mon_eff_sst_p=ggplot(filtered_data_before_first_record_dt_ss
   labs(x="SST (°C)",
        y="Record status",
        title="B) SST")+
-  theme_bw()
+  theme_bw()+
+  theme(axis.title.y = element_blank())
 test_sp_dt_time_sst_mon_eff_sst_p
 ```
 
 ```{r}
-test_sp_dt_time_sst_mon_eff_grid=gridExtra::grid.arrange(
+test_sp_dt_time_sst_mon_eff_grid=gridExtra::grid.arrange(left="Probability of record occurrence",
   test_sp_dt_time_sst_mon_eff_yr_p,
                         test_sp_dt_time_sst_mon_eff_sst_p,
                         test_sp_dt_time_sst_mon_eff_cint_p,
@@ -1094,6 +1129,118 @@ test_sp_dt_time_sst_mon_eff_grid=gridExtra::grid.arrange(
                         c(2,2,3,3)))
 
 test_sp_dt_time_sst_mon_eff_grid
-ggsave(filename ="test_sp_dt_time_sst_mon_eff_grid.png" ,plot =test_sp_dt_time_sst_mon_eff_grid ,device = "jpeg",units = "cm",width = 20,height = 14)
+ggsave(filename ="test_sp_dt_time_sst_mon_eff_grid.png" ,plot =test_sp_dt_time_sst_mon_eff_grid ,device = "jpeg",units = "cm",width = 20,height = 15)
 ```
 
+###monitoring effort control - no time
+Test
+```{r}
+test_sp_dt_time_sst_mon_eff_n_time=glmmTMB(
+  data = filtered_data_before_first_record_dt_sst_meff,
+  formula = records~scale(sources)+scale(annual_c_int)+scale(median_sst)+(1|h3_id/year_of_mhws)+(1|species),
+  family = "binomial")#,
+  #control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
+
+summary(test_sp_dt_time_sst_mon_eff_n_time)
+plot(DHARMa::simulateResiduals(test_sp_dt_time_sst_mon_eff_n_time))
+performance::check_singularity(test_sp_dt_time_sst_mon_eff_n_time)
+performance::check_convergence(test_sp_dt_time_sst_mon_eff_n_time)
+performance::check_collinearity(test_sp_dt_time_sst_mon_eff_n_time)
+test_sp_dt_time_sst_mon_eff_n_time_r2=MuMIn::r.squaredGLMM(test_sp_dt_time_sst_mon_eff_n_time)
+```
+
+Extract predictions
+```{r}
+test_sp_dt_time_sst_mon_eff_n_time_gg_cint=ggeffects::ggpredict(
+  test_sp_dt_time_sst_mon_eff_n_time,
+  terms=c("annual_c_int [0:183 by =1]"))
+
+test_sp_dt_time_sst_mon_eff_n_time_gg_yr=ggeffects::ggpredict(
+  test_sp_dt_time_sst_mon_eff_n_time,
+  terms=c("year_of_mhws [1987:2022 by =1]"))
+
+test_sp_dt_time_sst_mon_eff_n_time_gg_sst=ggeffects::ggpredict(
+  test_sp_dt_time_sst_mon_eff_n_time,
+  terms=c("median_sst [14:24 by = 0.5]"))
+
+write_rds(test_sp_dt_time_sst_mon_eff_n_time_gg_cint,
+          "test_sp_dt_time_sst_mon_eff_n_time_gg_cint.rds")
+write_rds(test_sp_dt_time_sst_mon_eff_n_time_gg_yr,
+          "test_sp_dt_time_sst_mon_eff_n_time_gg_yr.rds")
+write_rds(test_sp_dt_time_sst_mon_eff_n_time_gg_sst,
+          "test_sp_dt_time_sst_mon_eff_n_time_gg_sst.rds")
+```
+
+Plot
+```{r}
+#c_intensity
+test_sp_dt_time_sst_mon_eff_n_time_cint_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+  geom_point(aes(x=annual_c_int,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_n_time_gg_cint,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_time_sst_mon_eff_n_time_gg_cint,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="Annual cumulative intensity (°C-days)",
+       y="Record status",
+       title="C) MHWs")+
+  theme_bw()+
+  theme(axis.title.y = element_blank())
+test_sp_dt_time_sst_mon_eff_n_time_cint_p
+
+#years
+test_sp_dt_time_sst_mon_eff_n_time_yr_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+  geom_point(aes(x=year_of_mhws,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_n_time_gg_yr,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_time_sst_mon_eff_n_time_gg_yr,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="Year",
+       y="Record status",
+       title="A) Time")+
+  theme_bw()+
+  theme(axis.title.y = element_blank())
+test_sp_dt_time_sst_mon_eff_n_time_yr_p
+
+#SST
+test_sp_dt_time_sst_mon_eff_n_time_sst_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+  geom_point(aes(x=median_sst,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_n_time_gg_sst,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_time_sst_mon_eff_n_time_gg_sst,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="SST (°C)",
+       y="Record status",
+       title="B) SST")+
+  theme_bw()+
+  theme(axis.title.y = element_blank())
+test_sp_dt_time_sst_mon_eff_n_time_sst_p
+```
+
+```{r}
+test_sp_dt_time_sst_mon_eff_n_time_grid=gridExtra::grid.arrange(left="Probability of record occurrence",
+  test_sp_dt_time_sst_mon_eff_n_time_yr_p,
+                        test_sp_dt_time_sst_mon_eff_n_time_sst_p,
+                        test_sp_dt_time_sst_mon_eff_n_time_cint_p,
+                        ncol = 2,
+                        nrow=2,
+  layout_matrix = rbind(c(1, 1,1,1), # Row 1: P1 and P2
+                        c(2,2,3,3)))
+
+test_sp_dt_time_sst_mon_eff_n_time_grid
+ggsave(filename ="test_sp_dt_time_sst_mon_eff_n_time_grid.png" ,plot =test_sp_dt_time_sst_mon_eff_n_time_grid ,device = "jpeg",units = "cm",width = 20,height = 15)
+```
