@@ -1,0 +1,1099 @@
+---
+title: "stage_4_bind_mhw_records"
+author: "Shahar Chaikin"
+date: "2025-09-24"
+output: html_document
+---
+
+Bind climatologies with records data
+
+Libraries
+```{r}
+library(tidyverse)
+```
+
+data
+```{r}
+#trended
+ clim=read_rds("climatology_df_median_sst_10m.rds")
+ events=read_rds("event_df_median_sst_10m.rds")
+#detrended
+clim_dt=read_rds("climatology_dt_df.rds")
+events_dt=read_rds("event_dt_df.rds")
+
+#Proxy for monitoring effort
+ormef <- read.delim("C:\\Users\\User\\Desktop\\research\\data\\ORMEF\\89476.tsv") %>% 
+  mutate(
+    # 1. str_replace() changes all commas (",") in the string to a period (".")
+    Decimal_Lat = str_replace(Decimal_Lat, ",", "."),
+    Decimal_Long = str_replace(Decimal_Long, ",", ".")) %>%
+  # 2. Use a second mutate() call to convert the new string format to a numeric type
+  mutate(
+    Decimal_Lat = as.numeric(Decimal_Lat),
+    Decimal_Long = as.numeric(Decimal_Long),
+    h3_id = h3jsr::point_to_cell(
+    input = sf::st_as_sf(.,
+                         coords = c("Decimal_Long", "Decimal_Lat"),
+                         crs = 4326),
+    res = 3)) %>% 
+  filter(Category %in%"EXOTIC CAN")
+
+ormef_h3_id=ormef %>% 
+  group_by(h3_id) %>% 
+  summarise(sources=n_distinct(Reference))
+
+ormef_h3_id_year=ormef %>% 
+  group_by(h3_id,Year) %>% 
+  summarise(sources=n_distinct(Reference))
+
+ggplot(ormef_h3_id_year)+
+  geom_point(aes(x=Year,y=sources))
+```
+
+#1.1) annual cumulative intensity
+Estimate annual cumulative intensity per hexagon
+```{r eval=FALSE, include=FALSE}
+annual_c_int=clim %>% 
+  drop_na(median_sst_10m) %>% 
+  mutate(
+    # Create a new column, e.g., 'temp_anomaly'
+    intensity = dplyr::if_else(
+      !is.na(event_no), # The condition: is event_no not NA?
+      median_sst_10m - seas, # What to do if the condition is TRUE
+      0 # What to do if the condition is FALSE
+    )) %>% 
+    mutate(year_of_mhws=lubridate::year(date)) %>% 
+  group_by(h3_id,year_of_mhws) %>% 
+  summarise(annual_c_int=sum(intensity)) %>% 
+  mutate(year_of_records=year_of_mhws+1)
+
+#write_rds(annual_c_int,"annual_c_int.rds")
+```
+
+#1.2) Records data
+Add records data
+```{r}
+records=read_csv("records_cleaned.csv") %>% 
+  mutate(
+    h3_id = h3jsr::point_to_cell(
+      input = sf::st_as_sf(., coords = c("long", "lat"), crs = 4326),
+      res = 3)) %>% 
+  #remove marmara and black sea records that are not in the climatic model
+  filter(!h3_id%in%c("831ec8fffffffff", "831ec9fffffffff", "832d05fffffffff"))
+
+#For every h3_id, year,lat, and long keep only the first record
+records_min=records %>% 
+  group_by(h3_id,species) %>% 
+  filter(year%in%min(year)) %>% 
+ #For any remaining groups (h3_id/species) with multiple records in the minimum year, keep only the first one
+  slice(1) %>%
+#Ungroup the data (good practice after grouping operations)
+  ungroup()
+#Sum annual and spatial records
+records_min_count=records_min %>% 
+  group_by(h3_id,year) %>% 
+  summarise(records=n()) %>% 
+  rename(year_of_records=year)
+
+#records_sp_level
+records_min_sp_level=records %>% 
+  group_by(h3_id,species) %>% 
+  filter(year%in%min(year)) %>% 
+ #For any remaining groups (h3_id/species) with multiple records in the minimum year, keep only the first one
+  slice(1) %>%
+#Ungroup the data (good practice after grouping operations)
+  ungroup() %>% 
+  group_by(h3_id,species,year) %>% 
+  summarise(records=n()) %>% 
+  rename(year_of_records=year)
+
+```
+
+##1.2.1) Plot records
+Plot coords
+```{r}
+# Assuming your dataframe is named 'records'
+# Ensure 'lat' and 'long' columns exist in 'records'
+
+# 1. Get world map data
+world_map <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+
+# 2. Convert your 'records' data frame to an sf object
+records_sf <- records_min %>%
+  drop_na(lat, long) %>% # Remove rows with missing lat/long
+  sf::st_as_sf(coords = c("long", "lat"), crs = 4326) # CRS 4326 is WGS84 for lat/long
+
+# 3. Calculate the extent of your coordinates
+bbox <- sf::st_bbox(records_sf)
+
+# 4. Create the ggplot
+ggplot() +
+  # Add the world map
+  geom_sf(data = world_map, fill = "lightgrey", color = "darkgrey") +
+  # Add your data points
+  geom_sf(data = records_sf, size = 1, alpha = 0.7) +
+  # Crop the map to the extent of your points
+  coord_sf(
+    xlim = c(bbox["xmin"] - 1, bbox["xmax"] + 1), # Adjust buffer as needed
+    ylim = c(bbox["ymin"] - 1, bbox["ymax"] + 1), # Adjust buffer as needed
+    expand = FALSE # Prevents adding extra space around the crop
+  ) +
+  # Add labels and theme
+  labs(
+    title = "Species records",
+    x = "Longitude",
+    y = "Latitude",
+    color = "Species" # Legend title for species color
+  ) +
+  theme_minimal()+
+  guides(color=F)
+```
+
+#1.3) Bind MHWs and records
+Bind MHWs with the records of the succeeding year
+```{r}
+used_cells=read_rds("copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m/corrected_hex_level_data/final_data/all_hexagons_distinct_cells_count.rds") %>% 
+    mutate(h3_id = str_remove(h3_id, "_cleaned")) %>% 
+  select(h3_id,n_distinct_cells)
+
+
+c_int_records=annual_c_int %>% 
+    filter(h3_id%in%records_min_count$h3_id %>% unique) %>% 
+  left_join(records_min_count,
+            by=c("h3_id","year_of_records")) %>% 
+  mutate(records = replace_na(records, 0)) %>% 
+  left_join(used_cells,by="h3_id") %>% 
+  mutate(weights=log(n_distinct_cells))
+#write.csv(c_int_records,"c_int_records_pseudo_first_fbl.csv",row.names = F)
+```
+
+Bind species level
+```{r}
+# 1. Ungroup the MHW dataset first to avoid data structure errors
+annual_c_int_ungrouped <- annual_c_int %>% 
+  ungroup()
+
+# Get all unique species per h3_id from the records data
+h3_species_combo <- records_min_sp_level %>%
+  select(h3_id, species) %>%
+  unique()
+
+# Get the h3_id-year combinations along with annual_c_int from the UNGROUPED MHW data
+h3_year_combo_mhw <- annual_c_int_ungrouped %>%
+  select(h3_id, year_of_mhws, annual_c_int, year_of_records) %>%
+  unique()
+
+# 2. Perform the joins to create the final dataset
+final_data_clean <- h3_year_combo_mhw %>%
+  
+  # Cross-join MHW data with all species associated with that h3_id
+  # This creates every combination of (h3_id, year, species)
+  left_join(h3_species_combo, by = "h3_id") %>%
+  
+  # Join with the records data to get the 'records' count (1 or NA)
+  left_join(records_min_sp_level %>% select(h3_id, species, year_of_records, records), 
+            by = c("h3_id", "species", "year_of_records")) %>%
+  
+  # Replace NA in records with 0
+  mutate(records = replace_na(records, 0)) %>%
+  
+  # Ensure only the necessary columns remain and ordering is correct
+  select(h3_id, species, year_of_mhws, annual_c_int, year_of_records, records) %>%
+  
+  # Ungroup again just to ensure the final output is a regular data frame
+  ungroup()
+
+######################################################################
+#Now keep only mhe data preexcisting to the species record in h3_id
+filtered_data_before_first_record <- final_data_clean %>%
+  # 1. Group by the unique identifier pairs
+  group_by(h3_id, species) %>%
+  
+  # 2. Arrange the data chronologically (important for finding the 'first' record)
+  arrange(year_of_records, .by_group = TRUE) %>%
+  
+  # 3. Determine the year of the first record (records = 1)
+  #    - If records exist (sum(records) > 0), find the earliest year where records == 1.
+  #    - If no record exists for this h3_id/species, use the maximum year in the data
+  #      to ensure all rows are kept (as there is no 'first record' to stop at).
+  mutate(
+    first_record_year = if_else(
+      sum(records) > 0,
+      min(year_of_records[records == 1]),
+      max(year_of_records) # Keep all years if the species was never recorded
+    )
+  ) %>%
+  
+  # 4. Filter: keep rows where the year is less than or equal to the year of the
+  #    first record.
+  filter(year_of_records <= first_record_year) %>%
+  
+  # 5. Remove the helper column and ungroup
+  select(-first_record_year) %>%
+  ungroup() %>%
+  filter(!is.na(species))
+
+#write_rds(filtered_data_before_first_record,"filtered_data_before_first_record.rds")
+
+```
+
+Explore
+```{r}
+ggplot(c_int_records)+
+  geom_point(aes(x=year_of_records,y=records))
+
+ggplot(c_int_records)+
+  geom_point(aes(x=annual_c_int,y=records))
+
+ggplot(c_int_records)+
+  geom_point(aes(x=year_of_records,y=annual_c_int))
+```
+
+#1.4) GLMMs
+##aggregated
+```{r eval=FALSE, include=FALSE}
+library(glmmTMB)
+
+#nbinom2
+test2=glmmTMB(data = c_int_records,formula = records~annual_c_int+(1|h3_id),family = "nbinom2",weights = weights)
+summary(test2)
+performance::check_singularity(test2)
+performance::check_convergence(test2)
+sjPlot::plot_model(test2,type="eff",terms="annual_c_int",show.data = F)+
+  theme_bw()
+plot(DHARMa::simulateResiduals(test2))
+MuMIn::r.squaredGLMM(test2)
+AIC(test2)
+
+#nbinom
+test3=glmmTMB(data = c_int_records,formula = records~annual_c_int+(1|h3_id),family = "nbinom1")
+summary(test3)
+sjPlot::plot_model(test3,type="eff",terms="annual_c_int",show.data = F)
+plot(DHARMa::simulateResiduals(test3))
+MuMIn::r.squaredGLMM(test3)
+AIC(test3)
+```
+
+Extract predicted of the best model
+```{r}
+test2_gg=ggeffects::ggpredict(test2,terms="annual_c_int[0:381 by=1]")
+```
+
+Plot
+```{r}
+# 1. Extract the p-value for 'annual_c_int'
+# The p-value is in the fixed effects part of the model summary.
+p_value <- summary(test2)$coefficients$cond["annual_c_int", "Pr(>|z|)"]
+
+# 2. Extract the sample size (number of observations)
+N <- nobs(test2)
+
+# 3. Create a formatted label string
+# Format the p-value to a specific number of decimal places (e.g., 3)
+p_label <- paste0("p-value ", format.pval(p_value, digits = 3, eps = 0.001))
+N_label <- paste0("n = ", N)
+
+# 4. Determine the position for the labels
+# These coordinates are illustrative; adjust them to fit your plot data.
+# Assuming x is from 0 to about 120 and y is on a log scale (say max 1000).
+x_pos <- max(c_int_records_dt$annual_c_int, na.rm = TRUE) * 0.95 # Near top-right
+y_pos_p <- max(c_int_records_dt$records, na.rm = TRUE) * 0.95 
+y_pos_N <- max(c_int_records_dt$records, na.rm = TRUE) * 0.7 # Adjust vertical separation on log scale
+
+# Convert y_pos to a single data frame for geom_text/annotate if preferred
+stats_df <- data.frame(
+  x = c(x_pos, x_pos),
+  y = c(y_pos_p, y_pos_N),
+  label = c(p_label, N_label)
+)
+
+#plot
+test2_p=ggplot()+
+  geom_point(data=c_int_records,
+             aes(x=annual_c_int,y=records),
+             color="grey",
+             alpha=0.5)+
+  geom_ribbon(data=test2_gg,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3)+
+  geom_line(data=test2_gg,
+            aes(x=x,y=predicted))+
+  scale_fill_gradient(low = "grey70", high = "red", guide = "none") +
+  theme_bw()+
+  #scale_y_log10()+
+  labs(x="Annual cumulative intensity (°C-days)",
+       y="New records within the analysis period") +
+  #coord_cartesian(ylim=c(0,3))+
+  # Add the labels using annotate() for fixed positions
+  annotate("text", x = 381, y = 16, 
+           label = p_label, 
+           hjust = 1, vjust = 1, size = 4) +
+  annotate("text", x = 381, y = 14, 
+           label = N_label, 
+           hjust = 1, vjust = 1, size = 4)+
+  ggbreak::scale_y_break(breaks=c(2,3),scales = c(2,0.5))+
+  scale_y_continuous(breaks=c(0,1,2,5,10,15,20))
+test2_p
+ggsave(filename ="test2_p.png" ,plot =test2_p ,device = "jpeg",units = "cm",width = 15,height = 10)
+```
+
+##species_level
+```{r}
+library(glmmTMB)
+
+test_sp=glmmTMB(data = filtered_data_before_first_record,
+              formula = records~annual_c_int+(1|h3_id)+(1|species),
+              family = "binomial")
+summary(test_sp)
+performance::check_singularity(test_sp)
+performance::check_convergence(test_sp)
+sjPlot::plot_model(test_sp,type="eff",terms="annual_c_int",show.data = T)+
+  theme_bw()
+plot(DHARMa::simulateResiduals(test_sp))
+MuMIn::r.squaredGLMM(test_sp)
+AIC(test_sp)
+
+test_sp_gg=ggeffects::ggpredict(test_sp,terms="annual_c_int [0:240 by=1]")
+```
+
+Plot species level
+```{r}
+# 1. Extract the p-value for 'annual_c_int'
+# The p-value is in the fixed effects part of the model summary.
+p_value <- summary(test_sp)$coefficients$cond["annual_c_int", "Pr(>|z|)"]
+
+# 2. Extract the sample size (number of observations)
+N <- nobs(test_sp)
+
+# 3. Create a formatted label string
+# Format the p-value to a specific number of decimal places (e.g., 3)
+p_label <- paste0("p-value ", format.pval(p_value, digits = 5, eps = 0.0001))
+N_label <- paste0("n = ", N)
+
+# 4. Determine the position for the labels
+# These coordinates are illustrative; adjust them to fit your plot data.
+# Assuming x is from 0 to about 120 and y is on a log scale (say max 1000).
+x_pos <- max(filtered_data_before_first_record$annual_c_int, na.rm = TRUE) * 0.95 # Near top-right
+y_pos_p <- max(filtered_data_before_first_record$records, na.rm = TRUE) * 0.95 
+y_pos_N <- max(filtered_data_before_first_record$records, na.rm = TRUE) * 0.7 # Adjust vertical separation on log scale
+
+# Convert y_pos to a single data frame for geom_text/annotate if preferred
+stats_df <- data.frame(
+  x = c(x_pos, x_pos),
+  y = c(y_pos_p, y_pos_N),
+  label = c(p_label, N_label)
+)
+
+test_sp_p=ggplot(filtered_data_before_first_record)+
+  geom_point(aes(x=annual_c_int,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=test_sp_gg,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_gg,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="Annual cumulative intensity (°C-days)",
+       y="Record status",
+       title="A) Fixed baseline")+
+  theme_bw()+
+  annotate("text", x = 55, y = 0.9, 
+           label = p_label, 
+           hjust = 1, vjust = 1, size = 4)# +
+  # annotate("text", x = 40, y = 0.8, 
+  #          label = N_label, 
+  #          hjust = 1, vjust = 1, size = 4)
+test_sp_p
+ggsave(filename ="test_sp_p.png" ,plot =test_sp_p ,device = "jpeg",units = "cm",width = 15,height = 10)
+```
+
+
+#2.1) detrended cumulative intensity
+Estimate annual cumulative intensity per hexagon
+```{r}
+annual_c_int_dt=clim_dt %>% 
+  drop_na(residuals) %>% 
+  mutate(
+    # Create a new column, e.g., 'intensity'
+    intensity = dplyr::if_else(
+      !is.na(event_no), # The condition: is event_no not NA?
+      residuals - seas, # What to do if the condition is TRUE
+      0 # What to do if the condition is FALSE
+    )) %>% 
+    mutate(year_of_mhws=lubridate::year(date)) %>% 
+  group_by(h3_id,year_of_mhws) %>% 
+  summarise(annual_c_int=sum(intensity)) %>% 
+  mutate(year_of_records=year_of_mhws+1)
+
+#write_rds(annual_c_int_dt,"annual_c_int_dt.rds")
+```
+
+#2.2) Bind MHWs and records
+Bind MHWs with the records of the succeeding year
+```{r}
+#add used cells per hexagon
+used_cells=read_rds("copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m/corrected_hex_level_data/final_data/all_hexagons_distinct_cells_count.rds") %>% 
+    mutate(h3_id = str_remove(h3_id, "_cleaned")) %>% 
+  select(h3_id,n_distinct_cells)
+
+c_int_records_dt=annual_c_int_dt %>% 
+  filter(h3_id%in%records_min_count$h3_id %>% unique) %>% 
+  left_join(records_min_count,
+            by=c("h3_id","year_of_records")) %>% 
+  mutate(records = replace_na(records, 0)) %>% 
+  left_join(used_cells,by="h3_id") %>% 
+  mutate(weights=log(n_distinct_cells))
+#write.csv(c_int_records_dt,"c_int_records_pseudo_first_dt.csv",row.names = F)
+```
+
+Explore
+```{r}
+ggplot(c_int_records_dt)+
+  geom_point(aes(x=year_of_records,y=records))
+
+ggplot(c_int_records_dt)+
+  geom_point(aes(x=annual_c_int,y=records))
+
+ggplot(c_int_records_dt)+
+  geom_point(aes(x=year_of_records,y=annual_c_int))
+```
+
+Bind species level
+```{r}
+# 1. Ungroup the MHW dataset first to avoid data structure errors
+annual_c_int_ungrouped_dt <- annual_c_int_dt %>% 
+  ungroup()
+
+# Get all unique species per h3_id from the records data
+h3_species_combo_dt <- records_min_sp_level %>%
+  select(h3_id, species) %>%
+  unique()
+
+# Get the h3_id-year combinations along with annual_c_int_dt from the UNGROUPED MHW data
+h3_year_combo_mhw_dt <- annual_c_int_ungrouped_dt %>%
+  select(h3_id, year_of_mhws, annual_c_int, year_of_records) %>%
+  unique()
+
+# 2. Perform the joins to create the final dataset
+final_data_clean_dt <- h3_year_combo_mhw_dt %>%
+  
+  # Cross-join MHW data with all species associated with that h3_id
+  # This creates every combination of (h3_id, year, species)
+  left_join(h3_species_combo_dt, by = "h3_id") %>%
+  
+  # Join with the records data to get the 'records' count (1 or NA)
+  left_join(records_min_sp_level %>% select(h3_id, species, year_of_records, records), 
+            by = c("h3_id", "species", "year_of_records")) %>%
+  
+  # Replace NA in records with 0
+  mutate(records = replace_na(records, 0)) %>%
+  
+  # Ensure only the necessary columns remain and ordering is correct
+  select(h3_id, species, year_of_mhws, annual_c_int, year_of_records, records) %>%
+  
+  # Ungroup again just to ensure the final output is a regular data frame
+  ungroup()
+
+######################################################################
+#Now keep only mhe data preexcisting to the species record in h3_id
+filtered_data_before_first_record_dt <- final_data_clean_dt %>%
+  # 1. Group by the unique identifier pairs
+  group_by(h3_id, species) %>%
+  
+  # 2. Arrange the data chronologically (important for finding the 'first' record)
+  arrange(year_of_records, .by_group = TRUE) %>%
+  
+  # 3. Determine the year of the first record (records = 1)
+  #    - If records exist (sum(records) > 0), find the earliest year where records == 1.
+  #    - If no record exists for this h3_id/species, use the maximum year in the data
+  #      to ensure all rows are kept (as there is no 'first record' to stop at).
+  mutate(
+    first_record_year = if_else(
+      sum(records) > 0,
+      min(year_of_records[records == 1]),
+      max(year_of_records) # Keep all years if the species was never recorded
+    )
+  ) %>%
+  
+  # 4. Filter: keep rows where the year is less than or equal to the year of the
+  #    first record.
+  filter(year_of_records <= first_record_year) %>%
+  
+  # 5. Remove the helper column and ungroup
+  select(-first_record_year) %>%
+  ungroup() %>%
+  filter(!is.na(species)) #%>% 
+  # left_join(read_rds(
+  # "copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m//corrected_hex_level_data/final_data/all_hexagons_daily_summary_10m.rds") %>%
+  # mutate(h3_id = str_remove(h3_id, "_cleaned"),
+  #        year_of_mhws=lubridate::year(date)) %>% 
+  # group_by(h3_id,year_of_mhws) %>% 
+  #            summarise(median_sst=median(mean_sst_10m)),by=c("h3_id","year_of_mhws")) %>% 
+  # left_join(ormef_h3_id,by="h3_id") %>% 
+  # mutate(weights=1/sources)
+
+#write_rds(filtered_data_before_first_record_dt,"filtered_data_before_first_record_dt.rds")
+
+```
+
+
+#2.4) GLMMs
+##aggregated
+```{r}
+library(glmmTMB)
+
+#nbinom2
+test2_dt=glmmTMB(data = c_int_records_dt,formula = records~annual_c_int+(1|h3_id),family = "nbinom2",
+                 weights = weights)
+summary(test2_dt)
+performance::check_singularity(test2_dt)
+performance::check_convergence(test2_dt)
+sjPlot::plot_model(test2_dt,type="eff",terms="annual_c_int",show.data = F)+
+  theme_bw()
+plot(DHARMa::simulateResiduals(test2_dt))
+MuMIn::r.squaredGLMM(test2_dt)
+AIC(test2_dt)
+
+#nbinom
+test3_dt=glmmTMB(data = c_int_records_dt,
+                 formula = records~annual_c_int+(1|h3_id),
+                 family = "nbinom1",
+                 weights = weights)
+summary(test3_dt)
+performance::check_singularity(test3_dt)
+performance::check_convergence(test3_dt)
+sjPlot::plot_model(test3_dt,type="eff",terms="annual_c_int",show.data = F)
+plot(DHARMa::simulateResiduals(test3_dt))
+MuMIn::r.squaredGLMM(test3_dt)
+AIC(test3_dt)
+```
+
+Extract predicted of the best model
+```{r}
+test3_dt_gg=ggeffects::ggpredict(test3_dt,terms="annual_c_int[0:212 by=1]")
+```
+
+Plot
+```{r}
+# 1. Extract the p-value for 'annual_c_int'
+# The p-value is in the fixed effects part of the model summary.
+p_value <- summary(test3_dt)$coefficients$cond["annual_c_int", "Pr(>|z|)"]
+
+# 2. Extract the sample size (number of observations)
+N <- nobs(test3_dt)
+
+# 3. Create a formatted label string
+# Format the p-value to a specific number of decimal places (e.g., 3)
+p_label <- paste0("p-value ", format.pval(p_value, digits = 3, eps = 0.001))
+N_label <- paste0("n = ", N)
+
+# 4. Determine the position for the labels
+# These coordinates are illustrative; adjust them to fit your plot data.
+# Assuming x is from 0 to about 120 and y is on a log scale (say max 1000).
+x_pos <- max(c_int_records_dt$annual_c_int, na.rm = TRUE) * 0.95 # Near top-right
+y_pos_p <- max(c_int_records_dt$records, na.rm = TRUE) * 0.95 
+y_pos_N <- max(c_int_records_dt$records, na.rm = TRUE) * 0.7 # Adjust vertical separation on log scale
+
+# Convert y_pos to a single data frame for geom_text/annotate if preferred
+stats_df <- data.frame(
+  x = c(x_pos, x_pos),
+  y = c(y_pos_p, y_pos_N),
+  label = c(p_label, N_label)
+)
+
+#plot
+test3_dt_p=ggplot()+
+  geom_point(data=c_int_records_dt,
+             aes(x=annual_c_int,y=records),
+             color="grey",
+             alpha=0.5)+
+  geom_ribbon(data=test3_dt_gg,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3)+
+  geom_line(data=test3_dt_gg,
+            aes(x=x,y=predicted))+
+  scale_fill_gradient(low = "grey70", high = "red", guide = "none") +
+  theme_bw()+
+  #scale_y_log10()+
+  labs(x="Annual cumulative intensity (°C-days)",
+       y="New records within the analysis period") +
+  #coord_cartesian(ylim=c(0,3))+
+  # Add the labels using annotate() for fixed positions
+  annotate("text", x = 210, y = 16, 
+           label = p_label, 
+           hjust = 1, vjust = 1, size = 4) +
+  annotate("text", x = 210, y = 14, 
+           label = N_label, 
+           hjust = 1, vjust = 1, size = 4)+
+  ggbreak::scale_y_break(breaks=c(1,2),scales = c(2,0.5))+
+  scale_y_continuous(breaks=c(0,1,2,5,10,15,20))
+test3_dt_p
+ggsave(filename ="test3_dt_p.png" ,plot =test3_dt_p ,device = "jpeg",units = "cm",width = 15,height = 10)
+```
+
+##species_level
+###simple
+```{r}
+library(glmmTMB)
+#check pre singularity
+filtered_data_before_first_record_dt %>% 
+  group_by(species) %>% 
+  summarise(n = n()) %>% 
+  arrange(n) %>%  view# Check for groups with very small 'n'
+
+filtered_data_before_first_record_dt %>% 
+  group_by(h3_id) %>% 
+  summarise(n = n()) %>% 
+  arrange(n) %>% view # Check for groups with very small 'n'
+
+
+test_sp_dt=glmmTMB(data = filtered_data_before_first_record_dt,
+              formula = records~scale(sources)+scale(annual_c_int)+scale(median_sst)+(1|h3_id)+(1|species),
+              family = "binomial")#,
+       # control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
+
+summary(test_sp_dt)
+performance::check_singularity(test_sp_dt)
+performance::check_convergence(test_sp_dt)
+performance::check_collinearity(test_sp_dt)
+sjPlot::plot_model(test_sp_dt,type="eff",terms="annual_c_int",show.data = T)+
+  theme_bw()
+plot(DHARMa::simulateResiduals(test_sp_dt))
+MuMIn::r.squaredGLMM(test_sp_dt)
+AIC(test_sp_dt)
+
+test_sp_dt_gg=ggeffects::ggpredict(test_sp_dt,terms="annual_c_int [0:183 by=1]")
+```
+
+Plot species level
+```{r}
+# 1. Extract the p-value for 'annual_c_int'
+# The p-value is in the fixed effects part of the model summary.
+p_value_dt <- summary(test_sp_dt)$coefficients$cond["annual_c_int", "Pr(>|z|)"]
+
+# 2. Extract the sample size (number of observations)
+N <- nobs(test_sp_dt)
+
+# 3. Create a formatted label string
+# Format the p-value to a specific number of decimal places (e.g., 3)
+p_label_dt <- paste0("p-value ", format.pval(p_value_dt, digits = 3, eps = 0.0001))
+
+test_sp_dt_p=ggplot(filtered_data_before_first_record_dt)+
+  geom_point(aes(x=annual_c_int,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=test_sp_dt_gg,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_gg,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="Annual cumulative intensity (°C-days)",
+       y="Record status",
+       title="B) Detrended baseline")+
+  theme_bw()+
+  annotate("text", x = 40, y = 0.9, 
+           label = p_label_dt, 
+           hjust = 1, vjust = 1, size = 4)# +
+  # annotate("text", x = 40, y = 0.8, 
+  #          label = N_label, 
+  #          hjust = 1, vjust = 1, size = 4)
+test_sp_dt_p
+ggsave(filename ="test_sp_dt_p.png" ,plot =test_sp_dt_p ,device = "jpeg",units = "cm",width = 15,height = 10)
+```
+
+###with time
+```{r}
+library(glmmTMB)
+
+cor.test(filtered_data_before_first_record_dt$year_of_mhws,filtered_data_before_first_record_dt$annual_c_int)
+
+test_sp_dt_time=glmmTMB(data = filtered_data_before_first_record_dt,
+              formula = records~annual_c_int+year_of_mhws+(1|h3_id)+(1|species),
+              family = "binomial",
+        control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
+
+summary(test_sp_dt_time)
+performance::check_singularity(test_sp_dt_time)
+performance::check_convergence(test_sp_dt_time)
+sjPlot::plot_model(test_sp_dt_time,type="eff",terms="annual_c_int",show.data = T)+
+  theme_bw()
+plot(DHARMa::simulateResiduals(test_sp_dt_time))
+MuMIn::r.squaredGLMM(test_sp_dt_time)
+AIC(test_sp_dt_time)
+
+test_sp_dt_time_gg=ggeffects::ggpredict(test_sp_dt_time,terms="annual_c_int [0:183 by=1]")
+```
+
+Plot
+```{r}
+# 1. Extract the p-value for 'annual_c_int'
+# The p-value is in the fixed effects part of the model summary.
+p_value_dt_time <- summary(test_sp_dt_time)$coefficients$cond["annual_c_int", "Pr(>|z|)"]
+
+# 2. Extract the sample size (number of observations)
+N <- nobs(test_sp_dt_time)
+
+# 3. Create a formatted label string
+# Format the p-value to a specific number of decimal places (e.g., 3)
+p_label_dt_time <- paste0("p-value ", format.pval(p_value_dt_time, digits = 3, eps = 0.0001))
+
+test_sp_dt_time_p=ggplot(filtered_data_before_first_record_dt)+
+  geom_point(aes(x=annual_c_int,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=test_sp_dt_time_gg,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_time_gg,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="Annual cumulative intensity (°C-days)",
+       y="Record status",
+       title="C) Detrended baseline (time control)")+
+  theme_bw()+
+  annotate("text", x = 40, y = 0.9, 
+           label = p_label_dt_time, 
+           hjust = 1, vjust = 1, size = 4)# +
+  # annotate("text", x = 40, y = 0.8, 
+  #          label = N_label, 
+  #          hjust = 1, vjust = 1, size = 4)
+test_sp_dt_time_p
+ggsave(filename ="test_sp_dt_time_p.png" ,plot =test_sp_dt_time_p ,device = "jpeg",units = "cm",width = 15,height = 10)
+```
+
+Add the long term SST as a better representative of long-term warming than years
+```{r}
+annual_sst=read_rds(
+  "copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m//corrected_hex_level_data/final_data/all_hexagons_daily_summary_10m.rds") %>%
+  mutate(h3_id = str_remove(h3_id, "_cleaned"),
+         year_of_mhws=lubridate::year(date)) %>% 
+  group_by(h3_id,year_of_mhws) %>% 
+             summarise(median_sst=median(mean_sst_10m))
+
+#add the annual sst
+filtered_data_before_first_record_dt=read_rds("filtered_data_before_first_record_dt.rds")
+filtered_data_before_first_record_dt_sst=filtered_data_before_first_record_dt %>% 
+  left_join(annual_sst,by=c("h3_id","year_of_mhws")) %>% 
+  left_join(ormef_h3_id ,by=c("h3_id")) %>% 
+  mutate(weights=1/sources)
+write_rds(filtered_data_before_first_record_dt_sst,"filtered_data_before_first_record_dt_sst.rds")
+```
+
+###with sst
+```{r}
+test_sp_dt_time_sst=glmmTMB(
+  data = filtered_data_before_first_record_dt_sst,
+  formula = records~scale(sources)+scale(annual_c_int)+scale(year_of_mhws)+scale(median_sst)+(1|h3_id/year_of_mhws)+(1|species),
+  family = "betabinomial")#,
+  #ziformula = ~1)#,
+  #control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
+
+summary(test_sp_dt_time_sst)
+plot(DHARMa::simulateResiduals(test_sp_dt_time_sst))
+performance::check_singularity(test_sp_dt_time_sst)
+performance::check_convergence(test_sp_dt_time_sst)
+performance::check_collinearity(test_sp_dt_time_sst)
+#quick plot
+sjPlot::plot_model(test_sp_dt_time_sst,type="eff",terms="annual_c_int",show.data = T)+
+  theme_bw()
+
+sjPlot::plot_model(test_sp_dt_time_sst,type="eff",terms="year_of_mhws",show.data = T)+
+  theme_bw()
+
+sjPlot::plot_model(test_sp_dt_time_sst,type="eff",terms="median_sst",show.data = T)+
+  theme_bw()
+
+MuMIn::r.squaredGLMM(test_sp_dt_time_sst)
+AIC(test_sp_dt_time_sst)
+
+test_sp_dt_time_sst_gg_cint=ggeffects::ggpredict(
+  test_sp_dt_time_sst,
+  terms=c("annual_c_int [0:183 by =1]"))
+
+test_sp_dt_time_sst_gg_yr=ggeffects::ggpredict(
+  test_sp_dt_time_sst,
+  terms=c("year_of_mhws [1987:2022 by =1]"))
+
+test_sp_dt_time_sst_gg_sst=ggeffects::ggpredict(
+  test_sp_dt_time_sst,
+  terms=c("median_sst [14:24 by = 0.5]"))
+
+write_rds(test_sp_dt_time_sst_gg_cint,"test_sp_dt_time_sst_gg_cint.rds")
+write_rds(test_sp_dt_time_sst_gg_yr,"test_sp_dt_time_sst_gg_yr.rds")
+write_rds(test_sp_dt_time_sst_gg_sst,"test_sp_dt_time_sst_gg_sst.rds")
+```
+
+Plot model
+```{r}
+#c_intensity
+test_sp_dt_time_sst_cint_p=ggplot(filtered_data_before_first_record_dt_sst)+
+  geom_point(aes(x=annual_c_int,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=test_sp_dt_time_sst_gg_cint,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_time_sst_gg_cint,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="Annual cumulative intensity (°C-days)",
+       y="Record status",
+       title="C) MHWs")+
+  theme_bw()
+test_sp_dt_time_sst_cint_p
+
+#years
+test_sp_dt_time_sst_yr_p=ggplot(filtered_data_before_first_record_dt_sst)+
+  geom_point(aes(x=year_of_mhws,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=test_sp_dt_time_sst_gg_yr,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_time_sst_gg_yr,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="Year of MHW | SST",
+       y="Record status",
+       title="A) Time")+
+  theme_bw()
+test_sp_dt_time_sst_yr_p
+
+#SST
+test_sp_dt_time_sst_sst_p=ggplot(filtered_data_before_first_record_dt_sst)+
+  geom_point(aes(x=median_sst,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=test_sp_dt_time_sst_gg_sst,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_time_sst_gg_sst,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="SST (°C)",
+       y="Record status",
+       title="B) SST")+
+  theme_bw()
+test_sp_dt_time_sst_sst_p
+```
+
+```{r}
+test_sp_dt_time_sst_grid=gridExtra::grid.arrange(
+  test_sp_dt_time_sst_yr_p,
+                        test_sp_dt_time_sst_sst_p,
+                        test_sp_dt_time_sst_cint_p,
+                        ncol = 2,
+                        nrow=2,
+  layout_matrix = rbind(c(1, 1,1,1), # Row 1: P1 and P2
+                        c(2,2,3,3)))
+
+test_sp_dt_time_sst_grid
+ggsave(filename ="test_sp_dt_time_sst_grid.png" ,plot =test_sp_dt_time_sst_grid ,device = "jpeg",units = "cm",width = 20,height = 14)
+```
+
+
+Plot proxy to monitoring effort
+```{r}
+# 2. Convert H3 IDs to Spatial Polygons (sf object)
+ormef_sf <- ormef_h3_id %>%
+  # Pass the entire data frame and specify the H3 column name
+  h3jsr::cell_to_polygon(
+    input = .,               # '.' refers to the incoming data frame
+    simple = FALSE           # Recommended for a tidy output
+  ) %>%
+  # The output is now a proper sf object, so st_set_crs works
+  sf::st_set_crs(4326)
+
+# 3. Get Mediterranean Land Boundaries for Context
+# Function from rnaturalearth
+world <-rnaturalearth:: ne_countries(scale = "large", returnclass = "sf")
+
+# 4. Create the ggplot map
+h3_map <- ggplot() +
+    # Plot the H3 Hexagons (your data)
+  geom_sf(
+    data = ormef_sf,
+    # Fills the hexagons based on the 'sources' count
+    aes(fill = sources), 
+    color = "black",     
+    linewidth = 0.1,     
+    alpha = 0.8          
+  ) +
+  # Add land boundaries first 
+  geom_sf(data = world, fill = "antiquewhite", color = "black", linewidth = 0.1) +
+  # Customize the color scale (from ggplot2 / viridis package, which tidyverse uses)
+  scale_fill_viridis_c(
+    name = "Number of Sources",
+    option = "magma"
+  ) +
+
+  # Set the map extent to focus on the Mediterranean Sea
+  coord_sf(
+    xlim = c(-6, 38),   
+    ylim = c(26, 48),  
+    expand = FALSE
+  ) +
+
+  # Apply a clean theme and labels
+  labs(
+    title = "Unique sources for Lessepsian records",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    panel.grid.major = element_line(color = "gray80", linewidth = 0.2),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    panel.background = element_rect(fill = "skyblue", color = NA) 
+  )
+h3_map
+ggsave(filename ="h3_map.png" ,plot =h3_map ,device = "jpeg",units = "cm",width = 25,height = 12)
+```
+
+###monitoring effort control
+Account for monitoring effort by years and h3_id
+This specifically accounts for the increased monitoring effort over time
+
+Use only hexagons that are within both datasets.
+```{r}
+h3_only_records=intersect(filtered_data_before_first_record_dt_sst$h3_id %>% unique(),ormef_h3_id_year$h3_id %>% unique)
+
+filtered_data_before_first_record_dt_sst_meff=
+  filtered_data_before_first_record_dt_sst %>%
+  filter(h3_id%in%h3_only_records) %>% 
+  select(-sources,-weights) %>% 
+  left_join(ormef_h3_id_year %>% 
+              rename(year_of_records=Year),
+            by=c("h3_id","year_of_records")) %>% 
+  mutate(sources=case_when(is.na(sources)~0,
+                           TRUE~sources))
+
+ggplot(filtered_data_before_first_record_dt_sst_meff)+
+  geom_point(aes(x=year_of_records,y=sources))
+
+cor.test(filtered_data_before_first_record_dt_sst_meff$sources,filtered_data_before_first_record_dt_sst_meff$year_of_mhws)
+
+#species
+filtered_data_before_first_record_dt_sst_meff$species %>% unique
+```
+
+Test
+```{r}
+test_sp_dt_time_sst_mon_eff=glmmTMB(
+  data = filtered_data_before_first_record_dt_sst_meff,
+  formula = records~scale(sources)+scale(annual_c_int)+scale(year_of_mhws)+scale(median_sst)+(1|h3_id)+(1|species),
+  family = "betabinomial")#,
+  #ziformula = ~1)#,
+  #control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
+
+summary(test_sp_dt_time_sst_mon_eff)
+plot(DHARMa::simulateResiduals(test_sp_dt_time_sst_mon_eff))
+performance::check_singularity(test_sp_dt_time_sst_mon_eff)
+performance::check_convergence(test_sp_dt_time_sst_mon_eff)
+performance::check_collinearity(test_sp_dt_time_sst_mon_eff)
+test_sp_dt_time_sst_mon_eff_r2=MuMIn::r.squaredGLMM(test_sp_dt_time_sst_mon_eff)
+```
+
+Extract predictions
+```{r}
+test_sp_dt_time_sst_mon_eff_gg_cint=ggeffects::ggpredict(
+  test_sp_dt_time_sst_mon_eff,
+  terms=c("annual_c_int [0:183 by =1]"))
+
+test_sp_dt_time_sst_mon_eff_gg_yr=ggeffects::ggpredict(
+  test_sp_dt_time_sst_mon_eff,
+  terms=c("year_of_mhws [1987:2022 by =1]"))
+
+test_sp_dt_time_sst_mon_eff_gg_sst=ggeffects::ggpredict(
+  test_sp_dt_time_sst_mon_eff,
+  terms=c("median_sst [14:24 by = 0.5]"))
+
+write_rds(test_sp_dt_time_sst_mon_eff_gg_cint,
+          "test_sp_dt_time_sst_mon_eff_gg_cint.rds")
+write_rds(test_sp_dt_time_sst_mon_eff_gg_yr,
+          "test_sp_dt_time_sst_mon_eff_gg_yr.rds")
+write_rds(test_sp_dt_time_sst_mon_eff_gg_sst,
+          "test_sp_dt_time_sst_mon_eff_gg_sst.rds")
+```
+
+Plot
+```{r}
+#c_intensity
+test_sp_dt_time_sst_mon_eff_cint_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+  geom_point(aes(x=annual_c_int,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_gg_cint,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_time_sst_mon_eff_gg_cint,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="Annual cumulative intensity (°C-days)",
+       y="Record status",
+       title="C) MHWs")+
+  theme_bw()
+test_sp_dt_time_sst_mon_eff_cint_p
+
+#years
+test_sp_dt_time_sst_mon_eff_yr_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+  geom_point(aes(x=year_of_mhws,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_gg_yr,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_time_sst_mon_eff_gg_yr,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="Year of MHW | SST",
+       y="Record status",
+       title="A) Time")+
+  theme_bw()
+test_sp_dt_time_sst_mon_eff_yr_p
+
+#SST
+test_sp_dt_time_sst_mon_eff_sst_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+  geom_point(aes(x=median_sst,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_gg_sst,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_time_sst_mon_eff_gg_sst,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="SST (°C)",
+       y="Record status",
+       title="B) SST")+
+  theme_bw()
+test_sp_dt_time_sst_mon_eff_sst_p
+```
+
+```{r}
+test_sp_dt_time_sst_mon_eff_grid=gridExtra::grid.arrange(
+  test_sp_dt_time_sst_mon_eff_yr_p,
+                        test_sp_dt_time_sst_mon_eff_sst_p,
+                        test_sp_dt_time_sst_mon_eff_cint_p,
+                        ncol = 2,
+                        nrow=2,
+  layout_matrix = rbind(c(1, 1,1,1), # Row 1: P1 and P2
+                        c(2,2,3,3)))
+
+test_sp_dt_time_sst_mon_eff_grid
+ggsave(filename ="test_sp_dt_time_sst_mon_eff_grid.png" ,plot =test_sp_dt_time_sst_mon_eff_grid ,device = "jpeg",units = "cm",width = 20,height = 14)
+```
+

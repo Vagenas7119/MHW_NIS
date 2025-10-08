@@ -1,0 +1,431 @@
+---
+title: "medits_models"
+author: "Shahar Chaikin"
+date: "2025-10-03"
+output: html_document
+---
+
+libraries
+```{r}
+library(tidyverse)
+library(glmmTMB)
+library(broom.mixed)
+```
+
+data
+```{r}
+#Biomass
+medits_mhw_biomass=read_rds("medits_mhw.rds")
+medits_mhw_biomass_nis=medits_mhw_biomass %>% 
+  filter(lessepsian%in%1)
+
+pop_by_nis=medits_mhw_biomass %>% 
+  filter(lessepsian%in%1) %>% 
+  group_by(species) %>% 
+  summarise(n_pop=n_distinct(unique_h3_population),
+            n_estimates=n(),
+            n_dist_yr=n_distinct(year),
+            n_dist_hex=n_distinct(h3_id))
+
+medits_mhw_biomass_nis=medits_mhw_biomass_nis %>% 
+  left_join(pop_by_nis %>%
+              select(species,n_estimates),
+            by="species") %>% 
+  mutate(weights=log(n_estimates))
+
+#Abundance
+medits_mhw_n=read_rds("medits_mhw_n.rds")
+medits_mhw_n_nis=medits_mhw_n %>% 
+  filter(lessepsian%in%1)
+
+pop_by_nis_n=medits_mhw_n %>% 
+  filter(lessepsian%in%1) %>% 
+  group_by(species) %>% 
+  summarise(n_pop=n_distinct(unique_h3_population),
+            n_estimates=n(),
+            n_dist_yr=n_distinct(year),
+            n_dist_hex=n_distinct(h3_id))
+
+medits_mhw_n_nis=medits_mhw_n_nis %>% 
+  left_join(pop_by_nis_n %>%
+              select(species,n_estimates),
+            by="species") %>% 
+  mutate(weights=log(n_estimates))
+```
+
+plot
+```{r}
+#Biomass
+ggplot(data=medits_mhw_biomass %>% 
+                   filter(lessepsian%in%1))+
+  geom_point(aes(x=annual_c_int,y=log_biomass_ratio ))
+
+medits_mhw_biomass$log_biomass_ratio %>% hist
+
+#Abundance
+ggplot(data=medits_mhw_n %>% 
+                   filter(lessepsian%in%1))+
+  geom_point(aes(x=annual_c_int,y=log_n_ratio ))
+
+medits_mhw_n$log_n_ratio %>% hist
+```
+
+#1) species-level
+##1.1) Biomass
+Setup and Model Fitting
+
+```{r}
+species_list_b <- medits_mhw_biomass_nis$species %>% unique()
+sp_test_b <- list()
+failed_models_b <- character()
+non_converged_models_b <- character() # List for models that failed convergence check
+
+# 1. Model Fitting with Robust Error and Convergence Handling
+for (i in species_list_b) {
+  # Subset data for the current species
+  data_sp_b <- medits_mhw_biomass_nis %>%
+    filter(species %in% i)
+
+  # Check if there's enough data (optional but recommended)
+  if (nrow(data_sp_b) < 2) {
+    message(paste("Skipping", i, "due to insufficient data for biomass."))
+    next
+  }
+
+  # Fit the model using tryCatch for robust error handling
+  model_result_b <- tryCatch({
+    glmmTMB(
+      data = data_sp_b,
+      formula = log_biomass_ratio ~ annual_c_int,
+      family = gaussian,
+      weights = weights
+    )
+  }, error = function(e) {
+    # If a hard error occurs during fitting, log the species and return NULL
+    message(paste("Biomass Model failed (Hard Error) for species:", i, "Error:", e$message))
+    failed_models_b <<- c(failed_models_b, i)
+    return(NULL)
+  })
+
+  # Check convergence if the model fitted without a hard error
+  if (!is.null(model_result_b)) {
+    is_converged_b <- performance::check_convergence(model_result_b)
+
+    if (is_converged_b) {
+      # Store the successful and converged model
+      sp_test_b[[i]] <- model_result_b
+    } else {
+      # Log the model that failed the convergence check
+      message(paste("Biomass Model failed (Non-Convergence) for species:", i))
+      non_converged_models_b <<- c(non_converged_models_b, i)
+    }
+  }
+}
+
+# Remove entries that are NULL
+sp_test_b <- purrr::compact(sp_test_b)
+
+# Summary of results
+message(paste("\nSuccessfully fitted and **converged** biomass models for", length(sp_test_b), "species."))
+message(paste("Biomass Models failed due to Hard Error:", paste(failed_models_b, collapse = ", ")))
+message(paste("Biomass Models excluded due to Non-Convergence:", paste(non_converged_models_b, collapse = ", ")))
+```
+Predicted Values Extraction (Biomass Data)
+```{r}
+# 2. Predicted Values Extraction (using ggeffects)
+predicted_values_df_b <- sp_test_b %>%
+  # map2_dfr is used to iterate over the models AND their names (species)
+  purrr::map2_dfr(.x = ., .y = names(.),
+    .f = function(model, species_name) {
+
+      # Get min/max of annual_c_int for the current species from the BIOMASS data
+      species_data_b <- medits_mhw_biomass_nis %>%
+        filter(species %in% species_name)
+      min_val <- min(species_data_b$annual_c_int, na.rm = TRUE)
+      max_val <- max(species_data_b$annual_c_int, na.rm = TRUE)
+
+      # Construct the terms argument
+      terms_arg <- paste0("annual_c_int[", min_val, ":", max_val, " by = 1]")
+
+      # Extract predicted values
+      predictions <- ggeffects::ggpredict(model, terms = terms_arg) %>%
+        as.data.frame() # Convert to standard dataframe
+
+      # Rename and select required columns
+      predictions %>%
+        select(x = x, predicted = predicted, ci_low = conf.low, ci_high = conf.high) %>%
+        # Add the species column
+        mutate(species = species_name, .before = 1)
+    }
+  )
+
+# The requested dataframe is 'predicted_values_df_b'
+```
+
+Model Summary Extraction (Biomass Data)
+```{r}
+# 3. Model Summary Extraction (using broom.mixed::tidy) - REVISED
+model_summary_df_b <- sp_test_b %>%
+  # map_dfr iterates over the models and combines the output into a single dataframe
+  purrr::map_dfr(
+    .f = function(model) {
+      # Extract summary using tidy()
+      summary_data <- broom.mixed::tidy(model, effects = "fixed")
+
+      # Filter for the 'annual_c_int' term
+      summary_data %>%
+        filter(term == "annual_c_int") %>%
+        # Select and rename columns: coefficient, t-value, p.value
+        select(
+          term,
+          coefficient = estimate,
+          z_value = statistic,
+          p_value = p.value
+        ) %>%
+        # Add a column for the number of observations (n)
+        mutate(n = nobs(model))
+    },
+    .id = "species" # Add a column identifying the list element name (species name)
+  )
+
+# The requested dataframe is 'model_summary_df_b'
+```
+
+##1.2) Abundance
+Setup and Model Fitting
+```{r}
+# Assuming 'medits_mhw_n_nis' is already loaded and contains 'species', 
+# 'log_n_ratio', 'annual_c_int', and 'weights'.
+
+species_list_n <- medits_mhw_n_nis$species %>% unique()
+sp_test_n <- list()
+failed_models <- character()
+non_converged_models <- character() # NEW: List for models that failed convergence check
+
+# 1. Model Fitting with Robust Error and Convergence Handling
+for (i in species_list_n) {
+  # Subset data for the current species
+  data_sp <- medits_mhw_n_nis %>%
+    filter(species %in% i)
+
+  # Check if there's enough data (optional but recommended)
+  if (nrow(data_sp) < 2) {
+    message(paste("Skipping", i, "due to insufficient data."))
+    next
+  }
+
+  # Fit the model using tryCatch for robust error handling
+  model_result <- tryCatch({
+    glmmTMB(
+      data = data_sp,
+      formula = log_n_ratio ~ annual_c_int,
+      family = gaussian, # Zero-inflation component
+      weights = weights
+    )
+  }, error = function(e) {
+    # If a hard error occurs during fitting, log the species and return NULL
+    message(paste("Model failed (Hard Error) for species:", i, "Error:", e$message))
+    failed_models <<- c(failed_models, i)
+    return(NULL)
+  })
+
+  # Check convergence if the model fitted without a hard error
+  if (!is.null(model_result)) {
+    is_converged <- performance::check_convergence(model_result)
+
+    if (is_converged) {
+      # Store the successful and converged model
+      sp_test_n[[i]] <- model_result
+    } else {
+      # Log the model that failed the convergence check
+      message(paste("Model failed (Non-Convergence) for species:", i))
+      non_converged_models <<- c(non_converged_models, i)
+    }
+  }
+}
+
+# Remove entries that are NULL (no longer strictly necessary after the check, 
+# but good practice if model_result was ever stored outside the loop)
+sp_test_n <- purrr::compact(sp_test_n)
+
+# Summary of results
+message(paste("\nSuccessfully fitted and **converged** models for", length(sp_test_n), "species."))
+message(paste("Models failed due to Hard Error:", paste(failed_models, collapse = ", ")))
+message(paste("Models excluded due to Non-Convergence:", paste(non_converged_models, collapse = ", ")))
+```
+
+Predicted Values Extraction
+```{r}
+# 2. Predicted Values Extraction (using ggeffects)
+predicted_values_df <- sp_test_n %>%
+  # map2_dfr is used to iterate over the models AND their names (species)
+  purrr::map2_dfr(.x = ., .y = names(.),
+    .f = function(model, species_name) {
+
+      # Get min/max of annual_c_int for the current species
+      species_data <- medits_mhw_n_nis %>%
+        filter(species %in% species_name)
+      min_val <- min(species_data$annual_c_int, na.rm = TRUE)
+      max_val <- max(species_data$annual_c_int, na.rm = TRUE)
+
+      # Construct the terms argument
+      terms_arg <- paste0("annual_c_int[", min_val, ":", max_val, " by = 1]")
+
+      # Extract predicted values
+      predictions <- ggeffects::ggpredict(model, terms = terms_arg) %>%
+        as.data.frame() # Convert to standard dataframe
+
+      # Rename and select required columns
+      predictions %>%
+        select(x = x, predicted = predicted, ci_low = conf.low, ci_high = conf.high) %>%
+        # Add the species column
+        mutate(species = species_name, .before = 1)
+    }
+  )
+
+# Display the resulting dataframe (first few rows)
+# head(predicted_values_df)
+# dim(predicted_values_df)
+
+# The requested dataframe is 'predicted_values_df'
+```
+
+Model Summary Extraction
+```{r}
+# 3. Model Summary Extraction (using broom.mixed::tidy) - REVISED
+model_summary_df <- sp_test_n %>%
+  # map_dfr iterates over the models and combines the output into a single dataframe
+  purrr::map_dfr(
+    .f = function(model) {
+      # Extract summary using tidy()
+      summary_data <- broom.mixed::tidy(model, effects = "fixed")
+
+      # Filter for the 'annual_c_int' term
+      summary_data %>%
+        filter(term == "annual_c_int") %>%
+        # Select and rename columns: estimate (coefficient), t-value, p.value
+        select(
+          term,
+          coefficient = estimate, # ADDED: The slope/coefficient
+          z_value = statistic,
+          p_value = p.value
+        ) %>%
+        # Add a column for the number of observations (n)
+        mutate(n = nobs(model))
+    },
+    .id = "species" # Add a column identifying the list element name (species name)
+  )
+
+# Display the resulting dataframe (first few rows)
+# head(model_summary_df)
+# dim(model_summary_df)
+
+# The requested dataframe is 'model_summary_df'
+```
+
+#2) all species
+##2.1) biomass
+```{r}
+test_nis=glmmTMB(data=medits_mhw_biomass_nis,
+             formula = log_biomass_ratio~annual_c_int+(1|h3_id),
+             family="gaussian",ziformula = ~1,weights = weights)
+plot(DHARMa::simulateResiduals(test_nis))
+summary(test_nis)
+performance::check_convergence(test_nis)
+performance::check_singularity(test_nis)
+MuMIn::r.squaredGLMM(test_nis)
+sjPlot::plot_model(test_nis,type="eff",terms = "annual_c_int",show.data = T)
+
+#predict
+test_nis_n_gg=ggeffects::ggpredict(test_nis,terms="annual_c_int[0:171 by=1]")
+```
+
+##2.2) abundance
+```{r}
+test_nis_n=glmmTMB(data=medits_mhw_n_nis,
+             formula = log_n_ratio~annual_c_int+(1|h3_id),
+             family="gaussian",ziformula = ~1,weights = weights)
+plot(DHARMa::simulateResiduals(test_nis_n))
+summary(test_nis_n)
+performance::check_convergence(test_nis_n)
+performance::check_singularity(test_nis_n)
+MuMIn::r.squaredGLMM(test_nis_n)
+sjPlot::plot_model(test_nis_n,type="eff",terms = "annual_c_int",show.data = T)
+
+#predict
+test_nis_n_gg=ggeffects::ggpredict(test_nis_n,terms="annual_c_int[0:171 by=1]")
+```
+
+#3) Plot
+
+Biomass
+```{r}
+biomass_ratios=ggplot()+
+  geom_rug(data=medits_mhw_biomass_nis,
+           aes(x=annual_c_int,y=log_biomass_ratio))+
+  geom_hline(yintercept = 0,linetype="dashed",color="grey")+
+  geom_line(data=predicted_values_df_b,
+            aes(x=x,y=predicted,color=species),alpha=0.3)+
+  geom_ribbon(data=test_nis_n_gg,
+              aes(x=x,ymin=conf.low,ymax=conf.high),alpha=0.3)+
+  geom_line(data=test_nis_n_gg,
+            aes(x=x,y=predicted),
+            linewidth=1)+
+    coord_cartesian(ylim=c(-6,6))+
+  theme_bw()+
+  labs(x="Cumulative intensity (°C-days)",
+       y="Log biomass ratio",
+       title="B) Biomass")+
+    theme(axis.title.x = element_blank())+
+  guides(color=F)
+biomass_ratios
+```
+
+Abudnance
+```{r}
+abundance_ratios=ggplot()+
+  geom_rug(data=medits_mhw_n_nis,
+           aes(x=annual_c_int,y=log_n_ratio))+
+  geom_hline(yintercept = 0,linetype="dashed",color="grey")+
+  geom_line(data=predicted_values_df,
+            aes(x=x,y=predicted,color=species),alpha=0.3)+
+  geom_ribbon(data=test_nis_n_gg,
+              aes(x=x,ymin=conf.low,ymax=conf.high),alpha=0.3)+
+  geom_line(data=test_nis_n_gg,
+            aes(x=x,y=predicted),
+            linewidth=1)+
+  coord_cartesian(ylim=c(-9.5,9.5))+
+  theme_bw()+
+  labs(x="Cumulative intensity (°C-days)",
+       y="Log abundance ratio",
+       title="A) Abundance")+
+  theme(axis.title.x = element_blank())+
+  guides(color=F)
+abundance_ratios
+```
+
+Bind
+```{r}
+# Use grid.arrange() with ncol=2 to place the plots side-by-side
+combined_ratios <- gridExtra::grid.arrange(bottom="Cumulative intensity (°C-days)",
+  abundance_ratios,
+  biomass_ratios,
+  ncol = 2)
+
+##ggsave
+ggsave(filename = "combined_ratios_p.png",plot = combined_ratios,device = "jpeg",width = 22,height = 10,units = "cm")
+```
+
+#4) Bind summaries
+```{r}
+model_summaries=bind_rows(model_summary_df %>% 
+                            mutate(type="abundance"),
+                          model_summary_df_b %>% 
+                            mutate(type="biomass")) %>% 
+  filter(!species%in%"Lagocephalus suezensis")
+
+test=lm(data=model_summaries,formula = coefficient~type,weights = log(n))
+summary(test)
+sjPlot::plot_model(test,type="eff",terms="type")
+```
+

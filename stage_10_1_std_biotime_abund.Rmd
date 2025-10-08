@@ -1,0 +1,409 @@
+---
+title: "bioTIME_subset"
+author: "Shahar Chaikin"
+date: "2025-10-06"
+output: html_document
+---
+
+libraries
+```{r}
+library(tidyverse)
+```
+
+Data entries:
+ID_ALL_RAW_DATA Unique BioTIME identifier for record
+
+ABUNDANCE Double representing the abundance for the record (see metadata for details of ABUNDANCE_TYPE
+
+BIOMASS Double representing the biomass for the record(see metadata for details of BIOMASS_TYPE ID_SPECIES Unique identifier linking to the species table
+
+SAMPLE_DESC Concatenation of variables comprising unique sampling event
+
+LATITUDE Latitude of record
+
+LONGITUDE Longitude of record
+
+DEPTH Depthor elevation of record if available
+
+DAY Numerical day of record
+
+MONTH Numerical value of month for record, i.e. January=1
+
+YEAR Year of record
+
+STUDY_ID BioTIME study unique identifier
+
+newID Validated species identifier key
+
+valid_name Highest taxonomic resolution of individual, preferred is genus and species resolution Level of resolution, i.e. ’species’ represented by genus and species taxon Higher level taxonomic grouping, i.e. Fish
+
+Mediterranean Data
+```{r}
+# Define the Mediterranean Sea bounding box coordinates
+MIN_LAT <- 30.2639
+MAX_LAT <- 45.7833
+MIN_LON <- -6.0327
+MAX_LON <- 36.2173
+
+biotime_med_fish=read_rds("C:\\Users\\User\\Desktop\\research\\data\\BioTIME 2\\biotime_v2_query_15April25.rds") %>% 
+  filter(
+    LATITUDE >= MIN_LAT,
+    LATITUDE <= MAX_LAT,
+    LONGITUDE >= MIN_LON,
+    LONGITUDE <= MAX_LON,
+    taxon%in%"Fish"
+  )
+
+m_data=read.csv("C:\\Users\\User\\Desktop\\research\\data\\BioTIME 2\\biotime_v2_metadata_15April25.csv") %>% 
+  filter(STUDY_ID%in%biotime_med_fish$STUDY_ID) %>% 
+  filter(REALM%in%"Marine")
+
+#Keep marine and species level
+biotime_med_fish_marine=biotime_med_fish %>% 
+  filter(STUDY_ID%in%m_data$STUDY_ID,
+         resolution%in%"species") %>% 
+  left_join(readxl::read_excel("C:\\Users\\User\\Desktop\\research\\data\\phd_stereo_bruvs\\data\\Belmaker_Species_Traits.xlsx") %>% 
+  select(valid_name=1,is_les=13),
+  by="valid_name") %>% 
+  mutate(valid_name=case_when(
+    valid_name%in%"Pempheris vanicolensis" ~ "Pempheris mangula",
+    valid_name%in%"Pempheris rhomboidea" ~ "Pempheris mangula",
+    valid_name%in%"Saurida undosquamis" ~ "Saurida lessepsianus",
+    valid_name%in%"Apogonichthyoides nigripinnis" ~ "Apogonichthyoides pharaonis",
+    valid_name%in%"Lagocephalus spadiceus" ~ "Lagocephalus guentheri",
+    TRUE~valid_name)) %>% 
+  mutate(is_les=case_when(valid_name%in%"Lagocephalus guentheri"~1,
+                          valid_name%in%"Pempheris mangula"~1,
+                          valid_name%in%"Saurida lessepsianus"~1,
+                          valid_name%in%"Sphyraena chrysotaenia"~1,
+                          valid_name%in%"Apogonichthyoides pharaonis"~1,
+                          TRUE~is_les)) %>% 
+  drop_na(ABUNDANCE)
+
+biotime_med_fish_marine %>% 
+  distinct(valid_name,is_les)
+```
+
+Show only studies that also documented Lessepsians
+```{r}
+#Keep only studies documenting both lessepsians and natives
+biotime_med_fish_marine_nis=biotime_med_fish_marine %>% 
+  filter(is_les%in%c("0","1")) %>% 
+  group_by(STUDY_ID) %>% 
+  filter(n_distinct(is_les)>1) %>% 
+  ungroup()
+```
+
+Grid samples by h3_id
+```{r}
+#Consider resampling to maintain equal sampling effort
+##grid by hexagons
+biotime_med_fish_marine_h3=biotime_med_fish_marine_nis %>% 
+  mutate(h3_id = h3jsr::point_to_cell(
+    input = sf::st_as_sf(.,
+                         coords = c("LONGITUDE", "LATITUDE"),
+                         crs = 4326),
+    res = 3),
+    assemblageID=paste(STUDY_ID,h3_id,sep = "_"),
+    unique_pop_id=paste(valid_name,STUDY_ID,h3_id,sep = "_")) %>% 
+  select(study_id=STUDY_ID,
+         sample_id=SAMPLE_DESC,
+         lat=LATITUDE,
+         long=LONGITUDE,
+         h3_id,
+         assemblageID,
+         unique_pop_id,
+         year=YEAR,
+         valid_name,
+         abund=ABUNDANCE,
+         is_les)
+
+#How many sp and samples per study?
+check_samples <- biotime_med_fish_marine_h3 %>% 
+  group_by(study_id,h3_id,assemblageID, year) %>% 
+  summarise(n_samples = n_distinct(sample_id), n_species = n_distinct(valid_name))
+check_samples$n_samples %>% hist
+check_samples$n_samples %>% quantile()
+
+
+#plot
+ggplot(check_samples, aes(x = year, y = n_samples)) +
+  # Use points and lines to show both individual years and trends
+  geom_col(linewidth = 0.6, color = "darkblue") +
+
+  # Facet the plot by h3_id. 'scales = "free_y"' allows the y-axis limits to
+  # adjust for each h3_id, improving visibility for areas with low sample counts.
+  facet_wrap(~ h3_id, scales = "free_y", ncol = 2) +
+  
+  # Add titles and labels
+  labs(
+    title = "Sample Effort Over Time by H3 Index (h3_id)",
+    x = "Year",
+    y = "Number of Samples (n_samples)") +
+  # Apply a clean theme and adjust text
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    # Reduce strip text size since h3_id is long
+    strip.text = element_text(size = 8, face = "bold"),
+    # Rotate x-axis text for better readability if years are crowded
+    axis.text.x = element_text(angle = 45, hjust = 1))
+```
+Resample
+Consider resampling samples (i.e., SAMPLE_DESC) within assemblageID (study within hexagon) to maintain equale sampling effort over the years. Chose the cutoff of how many samples per year to sample.
+```{r}
+#remove populations that were annualy poorly sampled (<3)
+biotime_med_fish_marine_h3_poorly=biotime_med_fish_marine_h3 %>% 
+  group_by(unique_pop_id,year) %>% 
+  filter(n_distinct(sample_id)>=3) %>% 
+  ungroup()
+
+check_samples2 <- biotime_med_fish_marine_h3_poorly %>% 
+  group_by(assemblageID,unique_pop_id,study_id,h3_id,year) %>% 
+  summarise(n_samples = n_distinct(sample_id), n_species = n_distinct(valid_name))
+
+#resample within assamblage IDs according to these values
+check_samples2_min=check_samples2 %>% 
+  group_by(unique_pop_id) %>% 
+  filter(n_samples==min(n_samples)) %>% 
+  distinct(unique_pop_id,n_samples)
+
+#count nis
+biotime_med_fish_marine_h3_poorly %>% 
+  filter(is_les%in%"1") %>% 
+  summarise(n_sp=n_distinct(valid_name))
+
+#How many assamblages?
+biotime_med_fish_marine_h3_poorly$assemblageID %>% n_distinct()
+
+#plot sampling effort for decision making
+ggplot(check_samples2)+
+  geom_jitter(aes(x = year, y = n_samples),
+              alpha=0.2)+
+    geom_boxplot(aes(x =year, y = n_samples,group=year))+
+    facet_wrap(~ assemblageID, scales = "free_y", ncol = 4,nrow = 3)
+```
+
+#Resample for equal samp_effort:
+Defining the Fixed Effort (m): The code first calculates the required number of distinct samples, m, for every unique_pop_id within an assemblageID.
+
+It finds the annual count of distinct sample_ids for that group.
+
+It then takes the minimum of these counts across all years. This minimum value, m, becomes the target effort.
+
+Enforcing the Fixed Effort: In the resampling loop, the do() function, combined with sample(..., size = m, replace = FALSE), is executed for every assemblageID/unique_pop_id/year group:
+
+group_by(assemblageID, unique_pop_id, year) ensures the operation is applied year-by-year for each population.
+
+sample(distinct_samples, size = m, ...) randomly selects exactly m distinct sample_ids from the available samples for that year.
+
+By forcing the selection of m distinct samples for every year, the code eliminates the variation in effort that was caused by differences in sampling intensity between years.
+
+In essence, the entire procedure reduces the higher-sampled years down to the effort level of the lowest-sampled year, thus creating a balanced dataset where the sampling effort (i.e., the number of distinct samples used) is constant across all years for a given population.
+
+```{r}
+# Load necessary libraries
+library(rlang) # Required for non-standard evaluation with !!!
+
+# Assuming the data is already loaded and named 'biotime_med_fish_marine_h3_poorly'
+
+# Set the number of iterations
+n_iterations <- 100
+
+# 1. Calculate the minimum annual sample count per unique_pop_id within an assemblageID
+min_samples_df <- biotime_med_fish_marine_h3_poorly %>%
+  # Group by the required levels for calculating the minimum
+  group_by(assemblageID, unique_pop_id, year) %>%
+  # Count the number of distinct samples for each group
+  summarise(n_samples = n_distinct(sample_id), .groups = "drop") %>%
+  # Re-group to find the minimum sample count per unique_pop_id across all years
+  group_by(assemblageID, unique_pop_id) %>%
+  # Find the minimum sample count for this unique_pop_id across all its years
+  # This is the 'fixed sampling effort' (m)
+  summarise(min_n_samples = min(n_samples), .groups = "drop")
+
+# 2. Resampling and Iteration
+
+# A list to store the results of each iteration
+resampled_data_list <- list()
+
+# A tibble to track the number of times each row (species record) was used
+# Initialize with a count of 0 for every row in the original data
+n_used_tracker <- biotime_med_fish_marine_h3_poorly %>%
+  # Assign a unique row_id for easy tracking
+  mutate(row_id = row_number()) %>%
+  select(row_id) %>%
+  mutate(n_used = 0)
+
+# Function to perform one iteration of resampling
+resample_iteration <- function(data, min_counts) {
+  # Join the data with the pre-calculated minimum sample counts
+  data_with_min <- data %>%
+    left_join(min_counts, by = c("assemblageID", "unique_pop_id"))
+
+  # Resample according to 'min_n_samples'
+  resampled_df <- data_with_min %>%
+    group_by(assemblageID, unique_pop_id, year) %>%
+    # Use 'slice_sample' to randomly select 'min_n_samples' distinct sample_ids
+    # from the current group (assemblageID, unique_pop_id, year).
+    # 'replace = FALSE' ensures sampling without replacement.
+    # The 'n' argument is set dynamically by the 'min_n_samples' column.
+    # NOTE: The selection is based on distinct 'sample_id', and all rows
+    # associated with the selected 'sample_id' are kept *if* the group size
+    # for the unique_pop_id, year is > 0.
+    # A more rigorous selection based on *distinct* sample_id first:
+    do({
+        # Get distinct sample_ids for the current group
+        distinct_samples <- unique(.$sample_id)
+        # Get the required minimum count (m)
+        m <- first(.$min_n_samples)
+
+        # Ensure m is not NA and is positive
+        if (is.na(m) || m <= 0) {
+            # Skip if no valid minimum count exists
+            return(tibble())
+        }
+
+        # Select 'm' distinct sample_ids without replacement
+        selected_sample_ids <- sample(
+            distinct_samples,
+            size = min(m, length(distinct_samples)), # Use min to avoid error if m > available
+            replace = FALSE
+        )
+
+        # Filter the original data rows for these selected sample_ids
+        # Return all rows corresponding to the selected sample_ids
+        filter(., sample_id %in% selected_sample_ids)
+    }) %>%
+    ungroup() %>%
+    # Remove the temporary column
+    select(-min_n_samples)
+
+  return(resampled_df)
+}
+
+# Run the iterations and track usage
+for (i in 1:n_iterations) {
+   # SET SEED HERE for reproducibility of the random sampling step
+  set.seed(42 + i) # Use a seed that changes but is deterministic based on the iteration
+
+  # 1. Perform resampling
+  resampled_iteration <- resample_iteration(biotime_med_fish_marine_h3_poorly %>% mutate(row_id = row_number()), min_samples_df)
+
+  # 2. Store the result (for mean abundance calculation)
+  # Add an iteration identifier
+  resampled_data_list[[i]] <- resampled_iteration %>%
+    mutate(iteration = i)
+
+  # 3. Update the usage tracker ('n_used')
+  # Get the row_ids that were selected in this iteration
+  selected_row_ids <- resampled_iteration$row_id
+
+  # Update the counts in the tracker
+  n_used_tracker <- n_used_tracker %>%
+    mutate(
+      n_used = ifelse(row_id %in% selected_row_ids, n_used + 1, n_used)
+    )
+}
+
+# 3. Final Aggregation
+
+# Combine all iteration results
+all_resampled_data <- bind_rows(resampled_data_list)
+
+# Calculate the mean abundance (mean of 'abund' column)
+mean_abundance_df <- all_resampled_data %>%
+  # Group by all identifiers and year
+  group_by(h3_id, assemblageID, unique_pop_id, lat, long, year) %>%
+  # Calculate the mean abundance across all iterations for this group
+  summarise(
+    mean_abundance = mean(abund, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Join the mean abundance with the usage count
+# Note: The usage count 'n_used' is per original row, which doesn't directly
+# map to the aggregated groups. Instead, we can calculate the *total* times a
+# unique_pop_id was sampled *across all iterations*.
+
+# Calculate n_used (total selection count across all iterations for each unique_pop_id)
+# This is a bit ambiguous in the prompt: "n_used (which is the number of times
+# a certain species was selected across all iterations)". Assuming it means the
+# *total number of observations (rows) used* for that final aggregated group.
+n_used_aggregated <- all_resampled_data %>%
+  # Group by the final aggregation levels
+  group_by(h3_id, assemblageID, unique_pop_id, lat, long, year) %>%
+  # Count the total number of rows used across all 100 iterations
+  summarise(
+    n_used = n(),
+    .groups = "drop"
+  )
+
+# Final Dataset Creation
+final_dataset <- mean_abundance_df %>%
+  # Join with the aggregated n_used count
+  left_join(n_used_aggregated, by = c("h3_id", "assemblageID", "unique_pop_id", "lat", "long", "year"))
+
+final_dataset2=final_dataset %>% 
+  mutate(survey_id = str_extract(unique_pop_id, "(?<=_)[^_]+"),
+         species = str_extract(unique_pop_id, "^[^_]+"),
+         type=case_when(survey_id%in%"505"~"trawl_commercial",
+                        survey_id%in%"664"~"batoid_uvc",
+                        survey_id%in%"798"~"scuba_uvc",
+                        survey_id%in%"808"~"trawl_scientific")) %>% 
+  left_join(biotime_med_fish_marine %>% 
+  distinct(species=valid_name,is_les),
+  by="species")
+
+#write
+#write_rds(final_dataset2,"biotime_std_n.rds")
+final_dataset2 %>% 
+  group_by(is_les) %>% 
+  summarise(n_distinct(species))
+```
+
+
+plot
+```{r}
+# 1. use the data biotime_med_fish_marine
+
+# 2. Determine the extent of the data and add a 2-degree buffer for context
+lon_range <- range(final_dataset$long, na.rm = TRUE)
+lat_range <- range(final_dataset$lat, na.rm = TRUE)
+
+min_lon <- lon_range[1] - 2
+max_lon <- lon_range[2] + 2
+min_lat <- lat_range[1] - 2
+max_lat <- lat_range[2] + 2
+
+# 3. Get the world map data
+world_map <-rnaturalearth::ne_countries(scale = "large", returnclass = "sf")
+
+# 4. Create the ggplot map
+biotime_map <- ggplot() +
+  # Map layer: using a light fill for land and a border
+  geom_sf(data = world_map, fill = "antiquewhite", color = "gray60", lwd = 0.3) +
+  # Survey points layer: set to red and partially transparent
+  geom_point(data = final_dataset,
+             aes(x = long, y = lat),
+             color = "red",
+             alpha = 0.4,
+             size = 0.8) +
+  # Crop the view to the calculated data extent
+  coord_sf(xlim = c(min_lon, max_lon),
+           ylim = c(min_lat, max_lat),
+           expand = FALSE) + # 'expand = FALSE' removes the default padding
+  # Styling
+  labs(title = "Geographic Distribution of BioTIME Surveys",
+       x = "Longitude",
+       y = "Latitude") +
+  theme_bw() +
+  theme(
+    # Set ocean background color
+    panel.background = element_rect(fill = "aliceblue"),
+    # Customize axis lines
+    panel.grid.major = element_line(color = "gray80", linetype = "dashed", linewidth = 0.2)
+  )
+biotime_map
+```
+
