@@ -860,7 +860,6 @@ write_rds(test_sp_dt_time_sst_gg_yr,"test_sp_dt_time_sst_gg_yr.rds")
 write_rds(test_sp_dt_time_sst_gg_sst,"test_sp_dt_time_sst_gg_sst.rds")
 ```
 
-Plot model
 ```{r}
 #c_intensity
 test_sp_dt_time_sst_cint_p=ggplot(filtered_data_before_first_record_dt_sst)+
@@ -961,27 +960,25 @@ h3_map <- ggplot() +
     alpha = 0.8          
   ) +
   # Add land boundaries first 
-  geom_sf(data = world, fill = "#B8D380", color = "black", linewidth = 0.1) +
+  geom_sf(data = world, fill = "antiquewhite", color = "black", linewidth = 0.1) +
   # Customize the color scale (from ggplot2 / viridis package, which tidyverse uses)
   scale_fill_viridis_c(
-    name = "Number of Sources",
-    option = "magma"
+    name = "Sources",
+    option = "turbo"
   ) +
-
   # Set the map extent to focus on the Mediterranean Sea
   coord_sf(
     xlim = c(-6, 38),   
     ylim = c(26, 48),  
     expand = FALSE
   ) +
-
   # Apply a clean theme and labels
   labs(
     title = "A) Spatial distribution of sources",
     x = "Longitude",
     y = "Latitude"
   ) +
-  theme_minimal() +
+  theme_bw() +
   theme(
 # --- CHANGE IS HERE ---
  # Moves the legend inside the plot using (x, y) coordinates
@@ -989,7 +986,7 @@ legend.position = c(0.22, 0.17),
 # Optional: Makes the legend background transparent
 legend.background = element_rect(fill = "transparent", color = NA),
 legend.key.size = unit(0.25, "cm"),
-panel.grid.major = element_line(color = "gray80", linewidth = 0.2),
+panel.grid.major = element_line(color = "skyblue", linewidth = 0.2),
     panel.background = element_rect(fill = "skyblue", color = NA) 
   )
 h3_map
@@ -1032,6 +1029,14 @@ cor.test(filtered_data_before_first_record_dt_sst_meff$sources,filtered_data_bef
 
 #species
 filtered_data_before_first_record_dt_sst_meff$species %>% unique
+#hexagons
+filtered_data_before_first_record_dt_sst_meff$h3_id %>% unique
+#Records
+filtered_data_before_first_record_dt_sst_meff %>% 
+  ungroup() %>% 
+  filter(records%in%1) %>% 
+  distinct(h3_id,species,year_of_mhws,records)
+
 ```
 
 bias grid
@@ -1039,14 +1044,12 @@ bias grid
 bias_grid=gridExtra::grid.arrange(
   h3_map,
                         source_temp,
-  layout_matrix = rbind(c(1, 1,1,1,1),
-                        c(1, 1,1,1,1),
-                        c(1, 1,1,1,1),# Row 1: P1 and P2
-                        c(NA,2,2,2,NA),
-                        c(NA,2,2,2,NA)))
-
-bias_grid
-ggsave(filename ="bias_grid.png" ,plot =bias_grid ,device = "jpeg",units = "cm",width = 20,height = 15)
+  layout_matrix = rbind(c(1, 1,1,1,1,1,1),
+                        c(1, 1,1,1,1,1,1),
+                        c(1, 1,1,1,1,1,1),# Row 1: P1 and P2
+                        c(NA,2,2,2,2,2,NA),
+                        c(NA,2,2,2,2,2,NA)))
+ggsave(filename ="bias_grid.png" ,plot =bias_grid ,device = "jpeg",units = "cm",width = 20,height = 20)
 ```
 
 
@@ -1089,7 +1092,7 @@ write_rds(test_sp_dt_time_sst_mon_eff_gg_sst,
           "test_sp_dt_time_sst_mon_eff_gg_sst.rds")
 ```
 
-Plot
+####Plot model
 ```{r}
 #c_intensity
 test_sp_dt_time_sst_mon_eff_cint_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
@@ -1103,12 +1106,36 @@ test_sp_dt_time_sst_mon_eff_cint_p=ggplot(filtered_data_before_first_record_dt_s
   geom_line(data=test_sp_dt_time_sst_mon_eff_gg_cint,
               aes(x=x,y=predicted),
             linewidth=1)+
-  labs(x="Annual cumulative intensity (°C-days)",
+  labs(x="Cumulative intensity (°C-days)",
        y="Record status",
        title="C) MHWs")+
   theme_bw()+
   theme(axis.title.y = element_blank())
 test_sp_dt_time_sst_mon_eff_cint_p
+
+#c_intensity zoom
+test_sp_dt_time_sst_mon_eff_cint_p_zoom=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_gg_cint,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_time_sst_mon_eff_gg_cint,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="Cumulative intensity (°C-days)",
+       y="Record status")+
+  theme_bw()+
+  theme(axis.title.y = element_blank())+
+coord_cartesian(ylim=c(0,.1))+
+  scale_y_continuous(breaks = seq(0,0.1,by=0.05))
+test_sp_dt_time_sst_mon_eff_cint_p_zoom
+
+#embed cint
+embeded_cint <- test_sp_dt_time_sst_mon_eff_cint_p +
+  annotation_custom(ggplotGrob(test_sp_dt_time_sst_mon_eff_cint_p_zoom),
+                    xmin = 50, xmax = 150,
+                    ymin = 0.1, ymax = 0.9)
+embeded_sst
 
 #years
 test_sp_dt_time_sst_mon_eff_yr_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
@@ -1146,13 +1173,39 @@ test_sp_dt_time_sst_mon_eff_sst_p=ggplot(filtered_data_before_first_record_dt_ss
        title="B) SST")+
   theme_bw()+
   theme(axis.title.y = element_blank())
+
 test_sp_dt_time_sst_mon_eff_sst_p
+
+#SST zoom
+test_sp_dt_time_sst_mon_eff_sst_p_zoom=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_gg_sst,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_time_sst_mon_eff_gg_sst,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="SST (°C)",
+       y="Record status")+
+  theme_bw()+
+  coord_cartesian(ylim=c(0,.1))+
+  scale_y_continuous(breaks = seq(0,0.1,by=0.05))+
+  theme(axis.title = element_blank(),
+        plot.background = element_rect(fill = "transparent", colour = NA))
+test_sp_dt_time_sst_mon_eff_sst_p_zoom
+#embed sst
+embeded_sst <- test_sp_dt_time_sst_mon_eff_sst_p +
+  annotation_custom(ggplotGrob(test_sp_dt_time_sst_mon_eff_sst_p_zoom),
+                    xmin = 15, xmax = 23,
+                    ymin = 0.1, ymax = 0.9)+
+  theme(axis.title.y = element_blank())
+embeded_sst
 ```
 
 ```{r}
 test_sp_dt_time_sst_mon_eff_grid=gridExtra::grid.arrange(left="Probability of record occurrence",
   test_sp_dt_time_sst_mon_eff_yr_p,
-                        test_sp_dt_time_sst_mon_eff_sst_p,
+                        embeded_sst,
                         test_sp_dt_time_sst_mon_eff_cint_p,
                         ncol = 2,
                         nrow=2,
@@ -1162,3 +1215,138 @@ test_sp_dt_time_sst_mon_eff_grid=gridExtra::grid.arrange(left="Probability of re
 test_sp_dt_time_sst_mon_eff_grid
 ggsave(filename ="test_sp_dt_time_sst_mon_eff_grid.png" ,plot =test_sp_dt_time_sst_mon_eff_grid ,device = "jpeg",units = "cm",width = 20,height = 15)
 ```
+
+###Plot used records
+```{r}
+# 2. Convert H3 IDs to Spatial Polygons (sf object)
+used_records_sf <- filtered_data_before_first_record_dt_sst_meff %>%
+  group_by(h3_id) %>%
+  summarise(sum_records=sum(records)) %>% 
+  # Pass the entire data frame and specify the H3 column name
+  h3jsr::cell_to_polygon(
+    input = .,               # '.' refers to the incoming data frame
+    simple = FALSE           # Recommended for a tidy output
+  ) %>%
+  # The output is now a proper sf object, so st_set_crs works
+  sf::st_set_crs(4326)
+
+# 3. Get Mediterranean Land Boundaries for Context
+# Function from rnaturalearth
+world <-rnaturalearth:: ne_countries(scale = "large", returnclass = "sf")
+ocean <-rnaturalearth:: ne_download(scale = "large",
+                                    type = "ocean",
+                                    category = "physical")
+
+# 4. Create the ggplot map
+records_map <- ggplot() +
+    # Plot the H3 Hexagons (your data)
+  geom_sf(
+    data = used_records_sf,
+    # Fills the hexagons based on the 'sources' count
+    aes(fill = sum_records), 
+    color = "black",     
+    linewidth = 0.1,     
+    alpha = 0.8          
+  ) +
+  # Add land boundaries first 
+  geom_sf(data = world, fill = "antiquewhite", color = "black", linewidth = 0.1) +
+  # Customize the color scale (from ggplot2 / viridis package, which tidyverse uses)
+  scale_fill_viridis_c(
+    name = "Records",
+    option = "turbo"
+  ) +
+  # Set the map extent to focus on the Mediterranean Sea
+  coord_sf(
+    xlim = c(-6, 38),   
+    ylim = c(26, 48),  
+    expand = FALSE
+  ) +
+  # Apply a clean theme and labels
+  labs(
+    title = "A) First records within the temoral range",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_bw() +
+  theme(
+# --- CHANGE IS HERE ---
+ # Moves the legend inside the plot using (x, y) coordinates
+legend.position = c(0.22, 0.17),
+# Optional: Makes the legend background transparent
+legend.background = element_rect(fill = "transparent", color = NA),
+legend.key.size = unit(0.25, "cm"),
+panel.grid.major = element_line(color = "skyblue", linewidth = 0.2),
+    panel.background = element_rect(fill = "skyblue", color = NA) 
+  )
+records_map
+ggsave(filename ="records_map.png" ,plot =records_map ,device = "jpeg",units = "cm",width = 25,height = 12)
+```
+
+sst over time
+```{r}
+sst_time=filtered_data_before_first_record_dt_sst_meff %>% 
+  group_by(h3_id) %>% 
+  distinct(h3_id,year_of_mhws,median_sst)
+sst_time_p=ggplot(sst_time)+
+  geom_point(aes(x=year_of_mhws,y=median_sst,color=median_sst),
+             alpha=0.3)+
+  geom_boxplot(aes(x=year_of_mhws,y=median_sst,group=year_of_mhws),
+               alpha=0.2,notch=T,outliers = F)+
+  geom_smooth(aes(x=year_of_mhws,y=median_sst),
+              formula = y~x,method = "lm",se = F,color="black")+
+  scale_color_viridis_c(
+    name = "SST",
+    option = "turbo"
+  ) +
+  labs(x="Years",y="Median SST (°C)",
+       title="B) SST trend")+
+  guides(color=F)+
+  theme_bw()
+sst_time_p
+ggsave(filename ="sst_time_p.png" ,plot =sst_time_p ,device = "jpeg",units = "cm",width = 20,height = 12)
+```
+
+Cumulative intensity over time
+```{r}
+c_int_time=filtered_data_before_first_record_dt_sst_meff %>% 
+  group_by(h3_id) %>% 
+  distinct(h3_id,year_of_mhws,annual_c_int)
+
+c_int_time_p=ggplot(c_int_time)+
+  geom_point(aes(x=year_of_mhws,y=annual_c_int,color=annual_c_int),
+             alpha=0.3)+
+  geom_boxplot(aes(x=year_of_mhws,y=annual_c_int,group=year_of_mhws),
+               alpha=0.2,notch=F,outliers = F)+
+  scale_color_viridis_c(
+    name = "Cumulative intensity",
+    option = "turbo"
+  ) +
+  labs(x="Years",y="Cumulative intensity (°C-days)",
+       title="C) MHWs detrended")+
+  guides(color=F)+
+  theme_bw()#+
+  # theme(legend.position=c(0.85, 0.8),
+  #       legend.background = element_blank(),
+  #       legend.key.size = unit(0.4, 'cm'))
+c_int_time_p
+ggsave(filename ="c_int_time_p.png" ,plot =c_int_time_p ,device = "jpeg",units = "cm",width = 20,height = 12)
+```
+
+Into grid
+```{r}
+intro_grid=gridExtra::grid.arrange(
+  records_map,
+  sst_time_p,
+  c_int_time_p,
+  ncol = 2,
+  nrow=2,
+  layout_matrix = rbind(c(1,1,1,1,1,1), # Row 1: P1 and P2
+                        c(1,1,1,1,1,1),
+                        c(1,1,1,1,1,1),
+                        c(2,2,2,3,3,3),
+                        c(2,2,2,3,3,3)))
+
+intro_grid
+ggsave(filename ="intro_grid.png" ,plot =intro_grid ,device = "jpeg",units = "cm",width = 20,height = 20)
+```
+
