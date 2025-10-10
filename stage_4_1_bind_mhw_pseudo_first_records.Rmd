@@ -1038,6 +1038,8 @@ filtered_data_before_first_record_dt_sst_meff %>%
   filter(records%in%1) %>% 
   distinct(h3_id,species,year_of_mhws,records)
 
+#write the analysis data with sources
+# write_rds(filtered_data_before_first_record_dt_sst_meff,"filtered_data_before_first_record_dt_sst_meff.rds")
 ```
 
 bias grid
@@ -1054,14 +1056,24 @@ ggsave(filename ="bias_grid.png" ,plot =bias_grid ,device = "jpeg",units = "cm",
 ```
 
 ###Test
+Load the data
+```{r}
+filtered_data_before_first_record_dt_sst_meff=read_rds("filtered_data_before_first_record_dt_sst_meff.rds") %>%#add the DCI_p index 
+  left_join(read.csv("dci_index.csv") %>% 
+              select(h3_id,
+                     DCI_P),
+            by="h3_id")
+```
+
+I am going to add current-weighted distance to the source variable.
 ```{r}
 test_sp_dt_time_sst_mon_eff=glmmTMB(
   data = filtered_data_before_first_record_dt_sst_meff,
-  formula = records~scale(sources)+scale(annual_c_int)+scale(year_of_mhws)+scale(median_sst)+(1|h3_id)+(1|species),
+  formula = records~scale(DCI_P)+scale(sources)+scale(annual_c_int)+scale(year_of_mhws)+scale(median_sst)+(1|h3_id)+(1|species),
   family = "betabinomial",#,
   #ziformula = ~1)#,
   control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
-
+write_rds(test_sp_dt_time_sst_mon_eff,"test_sp_dt_time_sst_mon_eff.rds")
 summary(test_sp_dt_time_sst_mon_eff)
 plot(DHARMa::simulateResiduals(test_sp_dt_time_sst_mon_eff))
 performance::check_singularity(test_sp_dt_time_sst_mon_eff)
@@ -1085,12 +1097,24 @@ test_sp_dt_time_sst_mon_eff_gg_sst=ggeffects::ggpredict(
   test_sp_dt_time_sst_mon_eff,
   terms=c("median_sst [14:24 by = 0.5]"))
 
+test_sp_dt_time_sst_mon_eff_gg_source=ggeffects::ggpredict(
+  test_sp_dt_time_sst_mon_eff,
+  terms=c("sources [0:6 by = 1]"))
+
+test_sp_dt_time_sst_mon_eff_gg_dcip=ggeffects::ggpredict(
+  test_sp_dt_time_sst_mon_eff,
+  terms=c("DCI_P [-0.06:0.06 by = 0.001]"))
+
 write_rds(test_sp_dt_time_sst_mon_eff_gg_cint,
           "test_sp_dt_time_sst_mon_eff_gg_cint.rds")
 write_rds(test_sp_dt_time_sst_mon_eff_gg_yr,
           "test_sp_dt_time_sst_mon_eff_gg_yr.rds")
 write_rds(test_sp_dt_time_sst_mon_eff_gg_sst,
           "test_sp_dt_time_sst_mon_eff_gg_sst.rds")
+write_rds(test_sp_dt_time_sst_mon_eff_gg_source,
+          "test_sp_dt_time_sst_mon_eff_gg_source.rds")
+write_rds(test_sp_dt_time_sst_mon_eff_gg_dcip,
+          "test_sp_dt_time_sst_mon_eff_gg_dcip.rds")
 ```
 
 ####Plot model
@@ -1112,7 +1136,7 @@ test_sp_dt_time_sst_mon_eff_cint_p=ggplot(filtered_data_before_first_record_dt_s
        title="C) MHWs")+
   theme_bw()+
   theme(axis.title.y = element_blank())
-test_sp_dt_time_sst_mon_eff_cint_p
+
 
 #c_intensity zoom
 test_sp_dt_time_sst_mon_eff_cint_p_zoom=ggplot(filtered_data_before_first_record_dt_sst_meff)+
@@ -1129,14 +1153,14 @@ test_sp_dt_time_sst_mon_eff_cint_p_zoom=ggplot(filtered_data_before_first_record
   theme(axis.title.y = element_blank())+
 coord_cartesian(ylim=c(0,.1))+
   scale_y_continuous(breaks = seq(0,0.1,by=0.05))
-test_sp_dt_time_sst_mon_eff_cint_p_zoom
+
 
 #embed cint
 embeded_cint <- test_sp_dt_time_sst_mon_eff_cint_p +
   annotation_custom(ggplotGrob(test_sp_dt_time_sst_mon_eff_cint_p_zoom),
                     xmin = 50, xmax = 150,
                     ymin = 0.1, ymax = 0.9)
-embeded_sst
+
 
 #years
 test_sp_dt_time_sst_mon_eff_yr_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
@@ -1155,7 +1179,7 @@ test_sp_dt_time_sst_mon_eff_yr_p=ggplot(filtered_data_before_first_record_dt_sst
        title="A) Time")+
   theme_bw()+
   theme(axis.title.y = element_blank())
-test_sp_dt_time_sst_mon_eff_yr_p
+
 
 #SST
 test_sp_dt_time_sst_mon_eff_sst_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
@@ -1175,8 +1199,6 @@ test_sp_dt_time_sst_mon_eff_sst_p=ggplot(filtered_data_before_first_record_dt_ss
   theme_bw()+
   theme(axis.title.y = element_blank())
 
-test_sp_dt_time_sst_mon_eff_sst_p
-
 #SST zoom
 test_sp_dt_time_sst_mon_eff_sst_p_zoom=ggplot(filtered_data_before_first_record_dt_sst_meff)+
   geom_ribbon(data=test_sp_dt_time_sst_mon_eff_gg_sst,
@@ -1193,14 +1215,14 @@ test_sp_dt_time_sst_mon_eff_sst_p_zoom=ggplot(filtered_data_before_first_record_
   scale_y_continuous(breaks = seq(0,0.1,by=0.05))+
   theme(axis.title = element_blank(),
         plot.background = element_rect(fill = "transparent", colour = NA))
-test_sp_dt_time_sst_mon_eff_sst_p_zoom
+
 #embed sst
 embeded_sst <- test_sp_dt_time_sst_mon_eff_sst_p +
   annotation_custom(ggplotGrob(test_sp_dt_time_sst_mon_eff_sst_p_zoom),
                     xmin = 15, xmax = 23,
                     ymin = 0.1, ymax = 0.9)+
   theme(axis.title.y = element_blank())
-embeded_sst
+
 ```
 
 ```{r}
@@ -1213,7 +1235,7 @@ test_sp_dt_time_sst_mon_eff_grid=gridExtra::grid.arrange(left="Probability of re
   layout_matrix = rbind(c(1, 1,1,1), # Row 1: P1 and P2
                         c(2,2,3,3)))
 
-test_sp_dt_time_sst_mon_eff_grid
+
 ggsave(filename ="test_sp_dt_time_sst_mon_eff_grid.png" ,plot =test_sp_dt_time_sst_mon_eff_grid ,device = "jpeg",units = "cm",width = 20,height = 15)
 ```
 
