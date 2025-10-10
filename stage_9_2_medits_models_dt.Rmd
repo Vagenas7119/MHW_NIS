@@ -12,10 +12,21 @@ library(glmmTMB)
 library(broom.mixed)
 ```
 
-data
+#data
 ```{r}
+#Annual SST
+annual_sst=read_rds(
+  "copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m//corrected_hex_level_data/final_data/all_hexagons_daily_summary_10m.rds") %>%
+  mutate(h3_id = str_remove(h3_id, "_cleaned"),
+         year_of_mhw=lubridate::year(date)) %>% 
+  group_by(h3_id,year_of_mhw) %>% 
+             summarise(median_sst=median(mean_sst_10m))
+
+
 #Biomass
-medits_mhw_biomass=read_rds("medits_mhw.rds")
+medits_mhw_biomass=read_rds("medits_mhw.rds") %>% 
+  left_join(annual_sst,by=c("h3_id","year_of_mhw"))
+##nis subset
 medits_mhw_biomass_nis=medits_mhw_biomass %>% 
   filter(lessepsian%in%1)
 
@@ -34,7 +45,10 @@ medits_mhw_biomass_nis=medits_mhw_biomass_nis %>%
   mutate(weights=log(n_estimates))
 
 #Abundance
-medits_mhw_n=read_rds("medits_mhw_n.rds")
+medits_mhw_n=read_rds("medits_mhw_n.rds") %>% 
+  left_join(annual_sst,by=c("h3_id","year_of_mhw"))
+medits_mhw_n$lessepsian=as.factor(medits_mhw_n$lessepsian)
+#less subset
 medits_mhw_n_nis=medits_mhw_n %>% 
   filter(lessepsian%in%1)
 
@@ -327,8 +341,9 @@ model_summary_df <- sp_test_n %>%
 ##2.1) biomass
 ```{r}
 test_nis=glmmTMB(data=medits_mhw_biomass_nis,
-             formula = log_biomass_ratio~annual_c_int+(1|h3_id),
+             formula = log_biomass_ratio~scale(annual_c_int)+scale(median_sst)+scale(year_of_mhw)+(1|h3_id),
              family="gaussian",ziformula = ~1,weights = weights)
+
 plot(DHARMa::simulateResiduals(test_nis))
 summary(test_nis)
 performance::check_convergence(test_nis)
@@ -336,14 +351,33 @@ performance::check_singularity(test_nis)
 MuMIn::r.squaredGLMM(test_nis)
 sjPlot::plot_model(test_nis,type="eff",terms = "annual_c_int",show.data = T)
 
+sjPlot::plot_model(test_nis,type="eff",terms = "median_sst",show.data = T)
 #predict
 test_nis_n_gg=ggeffects::ggpredict(test_nis,terms="annual_c_int[0:171 by=1]")
 ```
 
+all species
+```{r}
+test_all=glmmTMB(data=medits_mhw_biomass,
+             formula = log_biomass_ratio~as.factor(lessepsian)+scale(annual_c_int)+scale(median_sst)+scale(year_of_mhw)+(1|species),
+             family="gaussian",ziformula = ~1)
+
+plot(DHARMa::simulateResiduals(test_all))
+summary(test_all)
+performance::check_convergence(test_all)
+performance::check_singularity(test_all)
+MuMIn::r.squaredGLMM(test_all)
+sjPlot::plot_model(test_all,type="eff",terms = "annual_c_int",show.data = T)
+
+sjPlot::plot_model(test_all,type="eff",terms = "median_sst",show.data = T)
+
+```
+
+
 ##2.2) abundance
 ```{r}
 test_nis_n=glmmTMB(data=medits_mhw_n_nis,
-             formula = log_n_ratio~annual_c_int+(1|h3_id),
+             formula = log_n_ratio~scale(annual_c_int)+scale(median_sst)+scale(year_of_mhw)+(1|h3_id),
              family="gaussian",ziformula = ~1,weights = weights)
 plot(DHARMa::simulateResiduals(test_nis_n))
 summary(test_nis_n)
@@ -354,6 +388,22 @@ sjPlot::plot_model(test_nis_n,type="eff",terms = "annual_c_int",show.data = T)
 
 #predict
 test_nis_n_gg=ggeffects::ggpredict(test_nis_n,terms="annual_c_int[0:171 by=1]")
+```
+
+all species
+```{r}
+test_all_n=glmmTMB(data=medits_mhw_n,
+             formula = log_n_ratio~scale(annual_c_int)*lessepsian+scale(median_sst)*lessepsian+scale(year_of_mhw)*lessepsian+(1|h3_id),
+             family="gaussian",ziformula = ~1)
+plot(DHARMa::simulateResiduals(test_all_n))
+summary(test_all_n)
+performance::check_convergence(test_all_n)
+performance::check_singularity(test_all_n)
+MuMIn::r.squaredGLMM(test_all_n)
+sjPlot::plot_model(test_all_n,type="eff",terms = "annual_c_int",show.data = F)
+sjPlot::plot_model(test_all_n,type="eff",terms = "median_sst",show.data = F)
+sjPlot::plot_model(test_all_n,type="eff",terms = "year_of_mhw",show.data = F)
+sjPlot::plot_model(test_all_n,type="eff",terms = "lessepsian",show.data = F)
 ```
 
 #3) Plot
