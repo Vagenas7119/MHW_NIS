@@ -4,3 +4,291 @@ author: "Shahar Chaikin"
 date: "2025-10-07"
 output: html_document
 ---
+
+Libraries
+```{r}
+library(tidyverse)
+library(glmmTMB)
+```
+
+Data
+```{r}
+#medits
+medits_mhw_n=read_rds("medits_mhw_n.rds") %>% 
+  mutate(survey_id="medits") %>% 
+  select(unique_h3_population,
+         survey_id,
+         species,
+         h3_id,
+         year,
+         log_n_ratio,
+         year_of_mhw,
+         annual_c_int,
+         is_les=lessepsian) %>% 
+  ungroup()
+
+#BioTIME
+biotime_mhw_n_dt=read_rds("biotime_mhw_n_dt.rds") %>% 
+  select(unique_h3_population,
+         survey_id,
+         species,
+         h3_id,
+         year,
+         log_n_ratio,
+         year_of_mhw,
+         annual_c_int,
+         is_les) %>% 
+  ungroup()
+
+#Annual median SST
+annual_sst=read_rds(
+  "copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m//corrected_hex_level_data/final_data/all_hexagons_daily_summary_10m.rds") %>%
+  mutate(h3_id = str_remove(h3_id, "_cleaned"),
+         year_of_mhw=lubridate::year(date)) %>% 
+  group_by(h3_id,year_of_mhw) %>% 
+             summarise(median_sst=median(mean_sst_10m))
+
+#Bind
+medits_biotime_mhw_dt=bind_rows(medits_mhw_n,
+                               biotime_mhw_n_dt) %>% 
+  left_join(annual_sst,by=c("h3_id","year_of_mhw"))
+  
+medits_biotime_mhw_dt$is_les=as.factor(medits_biotime_mhw_dt$is_les)
+medits_biotime_mhw_dt$survey_id=as.character(medits_biotime_mhw_dt$survey_id)
+#NIS subset
+medits_biotime_mhw_dt_nis=medits_biotime_mhw_dt %>% 
+  filter(is_les%in%1) %>% 
+  mutate(country=case_when(h3_id%in%"833955fffffffff"~"Spain",
+                           h3_id%in%"833f35fffffffff"~"Italy",
+                           h3_id%in%"833f30fffffffff"~"Malta",
+                           h3_id%in%"833f32fffffffff"~"Malta",
+                           h3_id%in%"833f36fffffffff"~"Malta",
+                           h3_id%in%"832da6fffffffff"~"Cyprus",
+                           h3_id%in%"833f4dfffffffff"~"Cyprus",
+                           h3_id%in%"832db0fffffffff"~"Israel",
+                           h3_id%in%"832db5fffffffff"~"Israel",
+                           h3_id%in%"832db6fffffffff"~"Israel")) %>% 
+  mutate(ratios=exp(log_n_ratio))
+
+pop_by_h3=medits_biotime_mhw_dt_nis %>% 
+  group_by(h3_id) %>% 
+  summarise(n_pop=n_distinct(unique_h3_population),
+            log_n_pop=sqrt(n_pop)) %>% 
+  mutate(country=case_when(h3_id%in%"833955fffffffff"~"Spain",
+                           h3_id%in%"833f35fffffffff"~"Italy",
+                           h3_id%in%"833f30fffffffff"~"Malta",
+                           h3_id%in%"833f32fffffffff"~"Malta",
+                           h3_id%in%"833f36fffffffff"~"Malta",
+                           h3_id%in%"832da6fffffffff"~"Cyprus",
+                           h3_id%in%"833f4dfffffffff"~"Cyprus",
+                           h3_id%in%"832db0fffffffff"~"Israel",
+                           h3_id%in%"832db5fffffffff"~"Israel",
+                           h3_id%in%"832db6fffffffff"~"Israel"))
+
+medits_biotime_mhw_dt_nis=medits_biotime_mhw_dt_nis %>% 
+  ungroup() %>% 
+  left_join(pop_by_h3 %>% 
+              select(h3_id,log_n_pop),
+            by="h3_id")
+```
+
+Map the data
+```{r eval=FALSE, include=FALSE}
+# 2. Convert H3 IDs to Spatial Polygons (sf object)
+used_pop_sf <- medits_biotime_mhw_dt %>%
+  group_by(h3_id) %>%
+  summarise(unique_pop=n_distinct(unique_h3_population)) %>% 
+  # Pass the entire data frame and specify the H3 column name
+  h3jsr::cell_to_polygon(
+    input = .,               # '.' refers to the incoming data frame
+    simple = FALSE           # Recommended for a tidy output
+  ) %>%
+  # The output is now a proper sf object, so st_set_crs works
+  sf::st_set_crs(4326)
+
+# 3. Get Mediterranean Land Boundaries for Context
+# Function from rnaturalearth
+world <-rnaturalearth:: ne_countries(scale = "large", returnclass = "sf")
+
+# 4. Create the ggplot map
+pop_map <- ggplot() +
+    # Plot the H3 Hexagons (your data)
+  geom_sf(
+    data = used_pop_sf,
+    # Fills the hexagons based on the 'sources' count
+    aes(fill = unique_pop), 
+    color = "black",     
+    linewidth = 0.1,     
+    alpha = 0.8          
+  ) +
+  # Add land boundaries first 
+  geom_sf(data = world, fill = "antiquewhite", color = "black", linewidth = 0.1) +
+  # Customize the color scale (from ggplot2 / viridis package, which tidyverse uses)
+  scale_fill_viridis_c(
+    name = "Populations",
+    option = "turbo"
+  ) +
+  # Set the map extent to focus on the Mediterranean Sea
+  coord_sf(
+    xlim = c(-6, 38),   
+    ylim = c(26, 48),  
+    expand = FALSE
+  ) +
+  # Apply a clean theme and labels
+  labs(
+    title = "A) All species",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_bw() +
+  theme(
+# --- CHANGE IS HERE ---
+ # Moves the legend inside the plot using (x, y) coordinates
+legend.position = c(0.22, 0.17),
+# Optional: Makes the legend background transparent
+legend.background = element_rect(fill = "transparent", color = NA),
+legend.key.size = unit(0.25, "cm"),
+panel.grid.major = element_line(color = "skyblue", linewidth = 0.2),
+    panel.background = element_rect(fill = "skyblue", color = NA) 
+  )
+pop_map
+#ggsave(filename ="pop_map_all_sp.png" ,plot =pop_map ,device = "jpeg",units = "cm",width = 25,height = 12)
+```
+
+Lessepsians
+```{r eval=FALSE, include=FALSE}
+# 2. Convert H3 IDs to Spatial Polygons (sf object)
+used_pop_less_sf <- medits_biotime_mhw_dt %>%
+  filter(is_les%in%"1") %>% 
+  group_by(h3_id) %>%
+  summarise(unique_pop=n_distinct(unique_h3_population)) %>% 
+  # Pass the entire data frame and specify the H3 column name
+  h3jsr::cell_to_polygon(
+    input = .,               # '.' refers to the incoming data frame
+    simple = FALSE           # Recommended for a tidy output
+  ) %>%
+  # The output is now a proper sf object, so st_set_crs works
+  sf::st_set_crs(4326)
+
+# 3. Get Mediterranean Land Boundaries for Context
+# Function from rnaturalearth
+world <-rnaturalearth:: ne_countries(scale = "large", returnclass = "sf")
+
+# 4. Create the ggplot map
+pop_map_less <- ggplot() +
+    # Plot the H3 Hexagons (your data)
+  geom_sf(
+    data = used_pop_less_sf,
+    # Fills the hexagons based on the 'sources' count
+    aes(fill = unique_pop), 
+    color = "black",     
+    linewidth = 0.1,     
+    alpha = 0.8          
+  ) +
+  # Add land boundaries first 
+  geom_sf(data = world, fill = "antiquewhite", color = "black", linewidth = 0.1) +
+  # Customize the color scale (from ggplot2 / viridis package, which tidyverse uses)
+  scale_fill_viridis_c(
+    name = "Populations",
+    option = "turbo"
+  ) +
+  # Set the map extent to focus on the Mediterranean Sea
+  coord_sf(
+    xlim = c(-6, 38),   
+    ylim = c(26, 48),  
+    expand = FALSE
+  ) +
+  # Apply a clean theme and labels
+  labs(
+    title = "B) Lessepsians",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_bw() +
+  theme(
+# --- CHANGE IS HERE ---
+ # Moves the legend inside the plot using (x, y) coordinates
+legend.position = c(0.22, 0.17),
+# Optional: Makes the legend background transparent
+legend.background = element_rect(fill = "transparent", color = NA),
+legend.key.size = unit(0.25, "cm"),
+panel.grid.major = element_line(color = "skyblue", linewidth = 0.2),
+    panel.background = element_rect(fill = "skyblue", color = NA) 
+  )
+pop_map_less
+#ggsave(filename ="pop_map_less.png" ,plot =pop_map_less ,device = "jpeg",units = "cm",width = 25,height = 12)
+```
+
+Exploratory 
+```{r}
+medits_biotime_mhw_dt$species %>% unique
+medits_biotime_mhw_dt %>% filter(is_les%in%1) %>% 
+  select(species) %>% unique
+
+ggplot(medits_biotime_mhw_dt%>% filter(is_les%in%1))+
+  geom_jitter(aes(x=survey_id,y=log_n_ratio))
+
+ggplot(medits_biotime_mhw_dt%>% filter(is_les%in%1))+
+  geom_hex(aes(x=annual_c_int,y=log_n_ratio))
+
+ggplot(medits_biotime_mhw_dt%>% filter(is_les%in%1))+
+  geom_hex(aes(x=year_of_mhw,y=log_n_ratio))
+
+ggplot(medits_biotime_mhw_dt%>% filter(is_les%in%1))+
+  geom_hex(aes(x=median_sst,y=log_n_ratio))
+
+ggplot(medits_biotime_mhw_dt%>% filter(is_les%in%1))+
+  geom_boxplot(aes(x=is_les,y=log_n_ratio),
+               outliers = F,notch=T)
+```
+
+Model
+```{r}
+test_1=glmmTMB(data=medits_biotime_mhw_dt_nis,
+        formula = log_n_ratio~scale(year_of_mhw)+scale(annual_c_int)+scale(median_sst)+(1|country/year_of_mhw),
+        family = "tweedie",
+        weights =log_n_pop,
+        control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
+
+summary(test_1)
+performance::check_convergence(test_1)
+performance::check_singularity(test_1)
+performance::check_collinearity(test_1)
+plot(DHARMa::simulateResiduals(test_1))
+
+
+#exp.
+test_2=glmmTMB(data=medits_biotime_mhw_dt_nis,
+        formula = ratios~scale(median_sst)+scale(annual_c_int)+(1|country),
+        weights =log_n_pop, 
+        family = Gamma(link = "log"))
+
+summary(test_2)
+performance::check_convergence(test_2)
+performance::check_singularity(test_2)
+performance::check_collinearity(test_2)
+plot(DHARMa::simulateResiduals(test_2))
+MuMIn::r.squaredGLMM(test_2)
+AIC(test_2)
+sjPlot::plot_model(test_2,type="eff",terms = "year_of_mhw")
+sjPlot::plot_model(test_2,type="eff",terms = "annual_c_int")
+sjPlot::plot_model(test_2,type="eff",terms = "median_sst")
+
+#exp with year
+test_3=glmmTMB(data=medits_biotime_mhw_dt_nis,
+        formula = ratios~scale(year_of_mhw)+scale(median_sst)+scale(annual_c_int)+(1|country),
+        weights =log_n_pop, 
+        family = Gamma(link = "log"))
+
+summary(test_3)
+performance::check_convergence(test_3)
+performance::check_singularity(test_3)
+performance::check_collinearity(test_3)
+plot(DHARMa::simulateResiduals(test_3))
+MuMIn::r.squaredGLMM(test_3)
+AIC(test_3)
+sjPlot::plot_model(test_3,type="eff",terms = "year_of_mhw")
+sjPlot::plot_model(test_3,type="eff",terms = "annual_c_int")
+sjPlot::plot_model(test_3,type="eff",terms = "median_sst")
+```
+
