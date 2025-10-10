@@ -14,7 +14,6 @@ Load data
 #fixed baseline
 Abundance
 ```{r}
-#MEDITS data
 biotime_cleaned_abundance=read_rds("annual_n_ratio_biotime.rds") #%>% 
   #left_join(read.csv("nis_native_harmo.csv"),by="species")
 #MHWs
@@ -35,7 +34,6 @@ biotime_mhw_n_fbl=biotime_cleaned_abundance %>%
 
 Abundance
 ```{r}
-#MEDITS data
 biotime_cleaned_abundance=read_rds("annual_n_ratio_biotime.rds") #%>% 
  # left_join(read.csv("nis_native_harmo.csv"),by="species")
 #MHWs

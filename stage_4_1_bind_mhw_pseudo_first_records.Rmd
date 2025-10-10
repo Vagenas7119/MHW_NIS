@@ -12,7 +12,7 @@ Libraries
 library(tidyverse)
 ```
 
-data
+#data
 ```{r}
 #trended
  clim=read_rds("climatology_df_median_sst_10m.rds")
@@ -999,6 +999,7 @@ This specifically accounts for the increased monitoring effort over time
 
 Use only hexagons that are within both datasets.
 ```{r}
+filtered_data_before_first_record_dt_sst=read_rds("filtered_data_before_first_record_dt_sst.rds")
 h3_only_records=intersect(filtered_data_before_first_record_dt_sst$h3_id %>% unique(),ormef_h3_id_year$h3_id %>% unique)
 
 filtered_data_before_first_record_dt_sst_meff=
@@ -1052,15 +1053,14 @@ bias_grid=gridExtra::grid.arrange(
 ggsave(filename ="bias_grid.png" ,plot =bias_grid ,device = "jpeg",units = "cm",width = 20,height = 20)
 ```
 
-
-Test
+###Test
 ```{r}
 test_sp_dt_time_sst_mon_eff=glmmTMB(
   data = filtered_data_before_first_record_dt_sst_meff,
   formula = records~scale(sources)+scale(annual_c_int)+scale(year_of_mhws)+scale(median_sst)+(1|h3_id)+(1|species),
-  family = "betabinomial")#,
+  family = "betabinomial",#,
   #ziformula = ~1)#,
-  #control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
+  control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
 
 summary(test_sp_dt_time_sst_mon_eff)
 plot(DHARMa::simulateResiduals(test_sp_dt_time_sst_mon_eff))
@@ -1068,6 +1068,7 @@ performance::check_singularity(test_sp_dt_time_sst_mon_eff)
 performance::check_convergence(test_sp_dt_time_sst_mon_eff)
 performance::check_collinearity(test_sp_dt_time_sst_mon_eff)
 test_sp_dt_time_sst_mon_eff_r2=MuMIn::r.squaredGLMM(test_sp_dt_time_sst_mon_eff)
+AIC(test_sp_dt_time_sst_mon_eff)
 ```
 
 Extract predictions
@@ -1214,6 +1215,25 @@ test_sp_dt_time_sst_mon_eff_grid=gridExtra::grid.arrange(left="Probability of re
 
 test_sp_dt_time_sst_mon_eff_grid
 ggsave(filename ="test_sp_dt_time_sst_mon_eff_grid.png" ,plot =test_sp_dt_time_sst_mon_eff_grid ,device = "jpeg",units = "cm",width = 20,height = 15)
+```
+
+
+###Test - no time
+```{r}
+test_sp_dt_time_sst_mon_eff_no_year=glmmTMB(
+  data = filtered_data_before_first_record_dt_sst_meff,
+  formula = records~scale(sources)+scale(annual_c_int)+scale(median_sst)+(1|h3_id)+(1|species),
+  family = "betabinomial")#,
+  #ziformula = ~1)#,
+  #control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
+
+summary(test_sp_dt_time_sst_mon_eff_no_year)
+plot(DHARMa::simulateResiduals(test_sp_dt_time_sst_mon_eff_no_year))
+performance::check_singularity(test_sp_dt_time_sst_mon_eff_no_year)
+performance::check_convergence(test_sp_dt_time_sst_mon_eff_no_year)
+performance::check_collinearity(test_sp_dt_time_sst_mon_eff_no_year)
+AIC(test_sp_dt_time_sst_mon_eff_no_year)
+test_sp_dt_time_sst_mon_eff_no_year_r2=MuMIn::r.squaredGLMM(test_sp_dt_time_sst_mon_eff_no_year)
 ```
 
 ###Plot used records
