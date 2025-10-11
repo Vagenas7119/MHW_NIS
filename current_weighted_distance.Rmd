@@ -28,13 +28,17 @@ currents=stars::read_ncdf(
     res = 3))
 
 #Used h3 for analysis
-analysis_h3=read_rds("filtered_data_before_first_record_dt_sst_meff.rds")
+analysis_h3=read_rds("filtered_data_before_first_record_dt_sst_meff.rds")$h3_id %>% unique
+medits_add=c("833955fffffffff","833f32fffffffff","832db5fffffffff")
+h3_filter=c(medits_add,analysis_h3)
 
 currents_used=currents %>% 
-  filter(h3_id%in%unique(analysis_h3$h3_id))
+  filter(h3_id%in%h3_filter)
 
 #write_rds(currents,"currents.rds")
 #write_rds(currents_used,"currents_used.rds")
+
+currents_used=read_rds("currents_used.rds")
 ```
 
 Median current velocity per h3
@@ -42,12 +46,7 @@ Median current velocity per h3
 currents_used_median=currents_used %>% 
   group_by(h3_id) %>% 
   summarise(median_eastern=median(as.numeric(uo)),
-            median_northern=median(as.numeric(vo))) 
-  # mutate(# Calculate the net speed magnitude (scalar)
-  #   net_speed_S = sqrt(median_eastern^2 + median_northern^2),
-  #   # 2. Define Cost (C)
-  #   # The cost is the inverse of the net speed
-  #   current_cost_C = 1 / (net_speed_S))
+            median_northern=median(as.numeric(vo)))
 ```
 
 plot eastern
@@ -251,8 +250,8 @@ dci_data_step_3 <- dci_data %>%
     # 1. Calculate Dispersal Vector components (Dx and Dy)
     # The x-component is sine (East/West), y-component is cosine (North/South)
     # Note: Longitude/X is scaled by cos(latitude) for accuracy, but we use simple trig for the unit vector D
-    Dx = sin(bearing_rad), # East-West component of the Dispersal path
-    Dy = cos(bearing_rad), # North-South component of the Dispersal path
+    Dx = sin(bearing_rad), # East-West component of the Dispersal path = 1 = complete east and -1 is full west component
+    Dy = cos(bearing_rad), # North-South component of the Dispersal path = 1 = complete north, and -1 is full south component.
     
     # 2. Calculate Current Assistance (Dot Product: V . D)
     # Assistance = (uo * Dx) + (vo * Dy)
