@@ -103,6 +103,7 @@ records_harm_corr=records_harm %>%
   filter(!original_search%in%c("Sargocentron sp.",
                                "Sphyraena chrysotaenia /  flavicauda"))
 
+#write.csv(records_harm_corr,"records_harm_corr.csv",row.names = F)
 #Fix the records data
 records_fix=records %>% 
   left_join(records_harm_corr %>% 
@@ -112,6 +113,8 @@ records_fix=records %>%
             by="species") %>% 
   select(-species) %>% 
   rename(species=species_corr)
+
+#write.csv(records_fix,"records_cleaned_harm.csv",row.names = F)
 
 #For every h3_id, year,lat, and long keep only the first record
 records_min=records_fix %>% 
@@ -1063,23 +1066,55 @@ filtered_data_before_first_record_dt_sst_meff=read_rds("filtered_data_before_fir
               select(h3_id,
                      DCI_P),
             by="h3_id")
+
+year_of_f_rec=ormef %>% 
+  group_by(Species) %>% 
+  summarise(first_rec_year=min(Year)) %>% 
+  rename(species=Species) %>% 
+  mutate(species=case_when(species%in%"Torquigener flavimaculosus"~"Torquigener hypselogeneion",
+            species%in%"Chelon carinatus"~"Planiliza carinata",
+            species%in%"Oxyurichthys petersi"~"Oxyurichthys petersii",
+            species%in%"Chelon carinatus"~"Cryptocentrus caeruleopunctatus",
+            species%in%"Hippocampus fuscus"~"Hippocampus kuda",
+            TRUE~species))
+
+filtered_data_before_first_record_dt_sst_meff=filtered_data_before_first_record_dt_sst_meff %>% 
+  left_join(year_of_f_rec,
+            by="species") %>% 
+  mutate(first_rec_year=case_when(species%in%"Cryptocentrus caeruleopunctatus"~2014,
+                                  species%in%"Himantura leoparda"~2016,#consider 2008 - paper
+                                  species%in%"Sardinella gibbosa"~2008,
+                                  species%in%"Ablennes hians"~2018,
+                                  species%in%"Cryptocentrus steinhardti"~2012,
+                                  species%in%"Sargocentron caudimaculatum"~2021,
+                                  TRUE~first_rec_year))
 ```
 
 I am going to add current-weighted distance to the source variable.
 ```{r}
 test_sp_dt_time_sst_mon_eff=glmmTMB(
   data = filtered_data_before_first_record_dt_sst_meff,
-  formula = records~scale(DCI_P)+scale(sources)+scale(annual_c_int)+scale(year_of_mhws)+scale(median_sst)+(1|h3_id)+(1|species),
-  family = "betabinomial",#,
+  formula = records~
+    scale(first_rec_year)+
+    scale(DCI_P)+
+    scale(sources)+
+    scale(annual_c_int)+
+    scale(year_of_mhws)+
+    scale(median_sst)+
+    (1|h3_id)+
+    (1|species),
+  family = "betabinomial")#,#,
   #ziformula = ~1)#,
-  control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
-write_rds(test_sp_dt_time_sst_mon_eff,"test_sp_dt_time_sst_mon_eff.rds")
+  #control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
+#write_rds(test_sp_dt_time_sst_mon_eff,"test_sp_dt_time_sst_mon_eff.rds")
+test_sp_dt_time_sst_mon_eff=read_rds("glmms\\test_sp_dt_time_sst_mon_eff\\test_sp_dt_time_sst_mon_eff.rds")
 summary(test_sp_dt_time_sst_mon_eff)
 plot(DHARMa::simulateResiduals(test_sp_dt_time_sst_mon_eff))
 performance::check_singularity(test_sp_dt_time_sst_mon_eff)
 performance::check_convergence(test_sp_dt_time_sst_mon_eff)
 performance::check_collinearity(test_sp_dt_time_sst_mon_eff)
 test_sp_dt_time_sst_mon_eff_r2=MuMIn::r.squaredGLMM(test_sp_dt_time_sst_mon_eff)
+test_sp_dt_time_sst_mon_eff_r2
 AIC(test_sp_dt_time_sst_mon_eff)
 ```
 
@@ -1105,6 +1140,10 @@ test_sp_dt_time_sst_mon_eff_gg_dcip=ggeffects::ggpredict(
   test_sp_dt_time_sst_mon_eff,
   terms=c("DCI_P [-0.06:0.06 by = 0.001]"))
 
+test_sp_dt_time_sst_mon_eff_gg_yfr=ggeffects::ggpredict(
+  test_sp_dt_time_sst_mon_eff,
+  terms=c("first_rec_year [1924:2021 by = 1]"))
+
 write_rds(test_sp_dt_time_sst_mon_eff_gg_cint,
           "test_sp_dt_time_sst_mon_eff_gg_cint.rds")
 write_rds(test_sp_dt_time_sst_mon_eff_gg_yr,
@@ -1115,6 +1154,8 @@ write_rds(test_sp_dt_time_sst_mon_eff_gg_source,
           "test_sp_dt_time_sst_mon_eff_gg_source.rds")
 write_rds(test_sp_dt_time_sst_mon_eff_gg_dcip,
           "test_sp_dt_time_sst_mon_eff_gg_dcip.rds")
+write_rds(test_sp_dt_time_sst_mon_eff_gg_yfr,
+          "test_sp_dt_time_sst_mon_eff_gg_yfr.rds")
 ```
 
 ####Plot model

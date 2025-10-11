@@ -29,7 +29,7 @@ currents=stars::read_ncdf(
 
 #Used h3 for analysis
 analysis_h3=read_rds("filtered_data_before_first_record_dt_sst_meff.rds")$h3_id %>% unique
-medits_add=c("833955fffffffff","833f32fffffffff","832db5fffffffff")
+medits_add=c("833955fffffffff","833f32fffffffff","832db5fffffffff") # add medits biotime related hex
 h3_filter=c(medits_add,analysis_h3)
 
 currents_used=currents %>% 
@@ -38,7 +38,7 @@ currents_used=currents %>%
 #write_rds(currents,"currents.rds")
 #write_rds(currents_used,"currents_used.rds")
 
-currents_used=read_rds("currents_used.rds")
+currents_used=read_rds("copernicus_data_by_hexagon/currents/currents_used.rds")
 ```
 
 Median current velocity per h3
@@ -68,7 +68,7 @@ world <-rnaturalearth:: ne_countries(scale = "large", returnclass = "sf")
 
 # 4. Create the ggplot map
 eastern_map <- ggplot() +
-    # Plot the H3 Hexagons (your data)
+    # Plot the H3 Hexagons
   geom_sf(
     data = currents_used_median_e_sf,
     # Fills the hexagons based on the 'sources' count
@@ -129,7 +129,7 @@ world <-rnaturalearth:: ne_countries(scale = "large", returnclass = "sf")
 
 # 4. Create the ggplot map
 northern_map <- ggplot() +
-    # Plot the H3 Hexagons (your data)
+    # Plot the H3 Hexagons
   geom_sf(
     data = currents_used_median_n_sf,
     # Fills the hexagons based on the 'sources' count
@@ -238,23 +238,35 @@ dci_data <- h3_centroids %>%
 calculating the dot product to find the component of the current that aids (or opposes) travel along the direct line to the source.
 
 Convert Bearing to Radians and Unit Vector: The bearing (direction of D) must be converted from degrees to radians, and then split into x (East/West) and y (North/South) components.
-V = net Current Vector (V):
+
+V = net Current Vector (V) - It is defined by the median current velocities extracted from the Copernicus data
+
+D = Dispersal Vector (D) - represents the necessary direction of travel—the straight-line path from the Suez Canal source to the target hexagon.
+
 Calculate Current Assistance (V⋅D):
 ```{r}
 dci_data_step_3 <- dci_data %>%
   rowwise() %>%
   mutate(
-    # Convert bearing to radians (required for trigonometric functions)
+    # Convert bearing to radians (standard unit of angular measure in mathematics; required for trigonometric functions)
     bearing_rad = bearing_deg * pi / 180,
     
     # 1. Calculate Dispersal Vector components (Dx and Dy)
     # The x-component is sine (East/West), y-component is cosine (North/South)
     # Note: Longitude/X is scaled by cos(latitude) for accuracy, but we use simple trig for the unit vector D
-    Dx = sin(bearing_rad), # East-West component of the Dispersal path = 1 = complete east and -1 is full west component
-    Dy = cos(bearing_rad), # North-South component of the Dispersal path = 1 = complete north, and -1 is full south component.
+    Dx = sin(bearing_rad), #The x-component (East-West) is the side opposite the angle measured from North, which is defined by the sine function.
+    # East-West component of the Dispersal path = 1 = complete east and -1 is full west component
+    
+    Dy = cos(bearing_rad), #The bearing is measured from North (0∘). The y-component (North-South) is therefore the adjacent side to the angle, which is defined by the cosine function.
+    # North-South component of the Dispersal path = 1 = complete north, and -1 is full south component.
     
     # 2. Calculate Current Assistance (Dot Product: V . D)
+    #The algebraic definition of the dot product (V⋅D):
+    #East-West current component (median_eastern) with the East-West dispersal direction (Dx).
+    #North-South current component (median_northern) with the North-South dispersal direction (Dy).
     # Assistance = (uo * Dx) + (vo * Dy)
+    #In terms of units:
+    #Current_Assistance=(m/s × unitless)+(m/s × unitless)
     Current_Assistance = (median_eastern * Dx) + (median_northern * Dy),
     
     # 3. Calculate Directional Current Index (DCI)
@@ -285,94 +297,10 @@ Explanation paragraph:
 To accurately account for the non-random spatial spread of non-indigenous species (NIS) following the prevalent oceanographic regime, we developed a novel predictor variable: the Distance-Penalized Directional Current Index (DCI P). This index was incorporated into the GLMM to isolate the effect of physical dispersal mechanisms from general time trends. The DCI P was calculated for each h3 hexagon as the product of the Current Assistance and an Exponential Distance Decay Penalty. The Current Assistance component was derived from the dot product (V⋅D), where V is the local median current velocity vector (uo and vo) and D is the unit vector defining the straight-line path from the Suez Canal source hexagon to the target hexagon. This dot product yields a value in m/s that is positive when the local current assists travel toward the target, and negative when the current opposes it. This assistance value was then penalized using an exponential decay function, e (−λ×Distance km ) , where Distance km is the Euclidean distance from the source. This penalty ensures that the index heavily weights against long-distance dispersal, reflecting the inherent ecological resistance of colonization over great distances. Consequently, a positive DCI P value indicates a hexagon is highly favorable for colonization (supported by current and close to the source), while a negative DCI P  value indicates strong opposition from the current, typically observed in westward locations against the prevailing counter-clockwise circulation.
 
 
-
-
 Interpretation of Directional Current Index (DCI)
 Positive DCI: The hexagon's current field generally aligns with the straight-line path from the Suez Canal. This represents a favorable location for spread. (Expected for areas along the Levantine coast).
 
 Negative DCI: The hexagon's current field generally opposes the straight-line path from the Suez Canal. This represents an unfavorable location for spread. (Expected for areas westward of the canal, like Libya).
-
-Plot DCI
-```{r}
-dci_data_step_3_sf <- dci_data_step_3 %>%
-  select(h3_id,DCI) %>% 
-  # Pass the entire data frame and specify the H3 column name
-  h3jsr::cell_to_polygon(
-    input = .,               # '.' refers to the incoming data frame
-    simple = FALSE           # Recommended for a tidy output
-  ) %>%
-  # The output is now a proper sf object, so st_set_crs works
-  sf::st_set_crs(4326)
-
-# 3. Get Mediterranean Land Boundaries for Context
-# Function from rnaturalearth
-world <-rnaturalearth:: ne_countries(scale = "large", returnclass = "sf")
-
-# 4. Create the ggplot map
-dci_map <- ggplot() +
-    # Plot the H3 Hexagons (your data)
-  geom_sf(
-    data = dci_data_step_3_sf,
-    # Fills the hexagons based on the 'sources' count
-    aes(fill = DCI), 
-    color = "black",     
-    linewidth = 0.1,     
-    alpha = 0.8          
-  ) +
-  # Add land boundaries first 
-  geom_sf(data = world, fill = "antiquewhite", color = "black", linewidth = 0.1) +
-  # Customize the color scale (from ggplot2 / viridis package, which tidyverse uses)
-  scale_fill_viridis_c(
-    name = "Directional Current Index",
-    option = "turbo"
-  ) +
-  # Set the map extent to focus on the Mediterranean Sea
-  coord_sf(
-    xlim = c(-6, 38),   
-    ylim = c(26, 48),  
-    expand = FALSE
-  ) +
-  # Apply a clean theme and labels
-  labs(
-    title = "Directional Current Index (km X m/s)",
-    x = "Longitude",
-    y = "Latitude"
-  ) +
-  theme_bw() +
-  theme(
-# --- CHANGE IS HERE ---
- # Moves the legend inside the plot using (x, y) coordinates
-legend.position = c(0.22, 0.17),
-# Optional: Makes the legend background transparent
-legend.background = element_rect(fill = "transparent", color = NA),
-legend.key.size = unit(0.25, "cm"),
-panel.grid.major = element_line(color = "skyblue", linewidth = 0.2),
-    panel.background = element_rect(fill = "skyblue", color = NA) 
-  )
-dci_map
-
-# The map of the Directional Current Index (DCI) shows the cumulative current assistance for any given hexagon (h3_id) along the straight-line path from the Suez Canal source.
-# 
-# The DCI calculation is:
-# 
-# DCI=Current_Assistance×Distance 
-# km
-# ​
-#  
-# 1. The Core Result
-# Warm Colors (Positive DCI): Areas like the Levantine Basin (Israel, Lebanon) and the Aegean Sea show high positive values (up to ∼200 km⋅m/s). This means that both the current is supportive and the distance travelled is substantial. The counter-clockwise current is physically facilitating the spread to these far-field locations.
-# 
-# Cool Colors (Negative DCI): Areas west of the Suez Canal, particularly along the North African coast, show negative values (down to ∼−300 km⋅m/s). This indicates that while the distance travelled is substantial, the currents actively oppose the movement, making colonization highly unlikely.
-# 
-# Near Zero Colors (Green/Yellow): Areas very close to the source or areas where the current is either weak or flowing perpendicular to the straight-line path.
-# 
-# 2. How the DCI Accounts for Distance
-# The DCI does not just account for distance; it uses distance to weight the velocity effect.
-# 
-# The DCI prevents a common statistical error: If you just used Current_Assistance (m/s), you would assume a hexagon near the source with a fast current has the same impact as one 1000 km away. By multiplying by distance, the DCI correctly identifies that a sustained, assisting current over a long distance is the most significant factor driving successful large-scale colonization.
-# 
-# In your GLMM, a strong positive coefficient on scale(DCI) will validate your core hypothesis: The colonization probability decreases proportionally to the cumulative cost/difficulty of travel imposed by the ocean currents.
-```
 
 Plot DCI_p
 ```{r}
@@ -386,8 +314,10 @@ dci_data_p_sf <- dci_data_step_3 %>%
   # The output is now a proper sf object, so st_set_crs works
   sf::st_set_crs(4326)
 
+world <-rnaturalearth:: ne_countries(scale = "large", returnclass = "sf")
+
 dci_p_map <- ggplot() +
-    # Plot the H3 Hexagons (your data)
+    # Plot the H3 Hexagons
   geom_sf(
     data = dci_data_p_sf,
     # Fills the hexagons based on the 'sources' count
@@ -399,10 +329,18 @@ dci_p_map <- ggplot() +
   # Add land boundaries first 
   geom_sf(data = world, fill = "antiquewhite", color = "black", linewidth = 0.1) +
   # Customize the color scale (from ggplot2 / viridis package, which tidyverse uses)
-  scale_fill_viridis_c(
-    name = "Directional Current Index (penalized)",
-    option = "turbo"
-  ) +
+  # scale_fill_viridis_c(
+  #   name = "Distance-penalized Directional Current Index",
+  #   option = "turbo"
+  # ) +
+   scale_fill_gradient2(
+    name = "Distance-penalized\nDirectional Current Index", # Use \n for clarity
+    low = "blue",        # Color for negative values (opposition)
+    mid = "white",       # Color for zero (neutrality/no effect)
+    high = "red",        # Color for positive values (assistance)
+    midpoint = 0,        # **Explicitly set the center of the scale to 0**
+    limits = c(min(dci_data_p_sf$DCI_P), max(dci_data_p_sf$DCI_P)) # Ensure full range is used
+  )+
   # Set the map extent to focus on the Mediterranean Sea
   coord_sf(
     xlim = c(-6, 38),   
@@ -411,7 +349,6 @@ dci_p_map <- ggplot() +
   ) +
   # Apply a clean theme and labels
   labs(
-    title = "Directional Current Index penalized (m/s)",
     x = "Longitude",
     y = "Latitude"
   ) +
@@ -419,7 +356,7 @@ dci_p_map <- ggplot() +
   theme(
 # --- CHANGE IS HERE ---
  # Moves the legend inside the plot using (x, y) coordinates
-legend.position = c(0.22, 0.17),
+legend.position = c(0.25, 0.17),
 # Optional: Makes the legend background transparent
 legend.background = element_rect(fill = "transparent", color = NA),
 legend.key.size = unit(0.25, "cm"),
@@ -429,8 +366,4 @@ panel.grid.major = element_line(color = "skyblue", linewidth = 0.2),
 dci_p_map
 ggsave(filename ="dci_p_map.png" ,plot =dci_p_map ,device = "jpeg",units = "cm",width = 20,height = 12)
 ```
-
-
-
-#2) Hydrographic Distance (HD)
 
