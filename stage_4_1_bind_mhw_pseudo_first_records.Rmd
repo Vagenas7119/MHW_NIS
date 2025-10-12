@@ -1280,6 +1280,83 @@ test_sp_dt_time_sst_mon_eff_grid=gridExtra::grid.arrange(left="Probability of re
 ggsave(filename ="test_sp_dt_time_sst_mon_eff_grid.png" ,plot =test_sp_dt_time_sst_mon_eff_grid ,device = "jpeg",units = "cm",width = 20,height = 15)
 ```
 
+Plot non-focal
+```{r}
+#Source
+test_sp_dt_time_sst_mon_eff_source_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+  geom_point(aes(x=sources,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_gg_source,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_time_sst_mon_eff_gg_source,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="Sources",
+       y="Record status",
+       title="A) Sources")+
+  theme_bw()+
+  theme(axis.title.y = element_blank())
+
+#Source
+test_sp_dt_time_sst_mon_eff_source_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+  geom_point(aes(x=sources,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_gg_source,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_time_sst_mon_eff_gg_source,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="Sources",
+       y="Probability of record occurrence",
+       title="A) Sources")+
+  theme_bw()+
+  theme(axis.title.y = element_blank())
+
+#Source
+test_sp_dt_time_sst_mon_eff_dcip_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+  geom_point(aes(x=DCI_P,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_gg_dcip,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_time_sst_mon_eff_gg_dcip,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="DCIp (m/s)",
+       y="Probability of record occurrence",
+       title="B) Distance-penalized Directional Current Index")+
+  theme_bw()+
+  theme(axis.title.y = element_blank())
+test_sp_dt_time_sst_mon_eff_dcip_p
+
+#Source
+test_sp_dt_time_sst_mon_eff_yfr_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+  geom_point(aes(x=first_rec_year,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_gg_yfr,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_time_sst_mon_eff_gg_yfr,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="Year of first record",
+       y="Probability of record occurrence",
+       title="C) Year of first record")+
+  theme_bw()+
+  theme(axis.title.y = element_blank())
+test_sp_dt_time_sst_mon_eff_yfr_p
+```
+
 
 ###Test - no time
 ```{r}
