@@ -85,7 +85,7 @@ pop_by_h3=medits_biotime_mhw_dt_nis %>%
                            h3_id%in%"832db5fffffffff"~"Israel",
                            h3_id%in%"832db6fffffffff"~"Israel"))
 
-medits_biotime_mhw_dt_nis=medits_biotime_mhw_dt_nis %>% 
+medits_biotime_mhw_dt_nis_added=medits_biotime_mhw_dt_nis %>% 
   ungroup() %>% 
   left_join(pop_by_h3 %>% 
               select(h3_id,log_n_pop),
@@ -93,7 +93,24 @@ medits_biotime_mhw_dt_nis=medits_biotime_mhw_dt_nis %>%
   left_join(read.csv("dci_index.csv") %>% 
               select(h3_id,
                      DCI_P),
-            by="h3_id")
+            by="h3_id") %>% 
+  left_join(read.csv("cpi_data_with_C.csv") %>% 
+              select(h3_id,
+                     CPI),
+            by="h3_id") %>% 
+  left_join(read.csv("species_yfr.csv"),
+            by="species") %>% 
+  mutate(species=case_when(species%in%"Torquigener flavimaculosus"~"Torquigener hypselogeneion",
+            TRUE~species)) %>% 
+  mutate(first_rec_year=case_when(species%in%"Upeneus moluccensis"~1947,
+                                  species%in%"Dussumieria elopsoides"~1949,#consider 2008 - paper
+                                  species%in%"Torquigener hypselogeneion"~1987,
+                                  species%in%"Torquigener hypselogeneion"~1987,
+                                  species%in%"Alepes djedaba"~1927,
+                                  species%in%"Cynoglossus sinusarabici"~1953,
+                                  species%in%"Pomadasys stridens"~1969,
+                                  species%in%"Himantura uarnak"~1955,
+                                  TRUE~first_rec_year))
 ```
 
 Map the data
@@ -248,10 +265,16 @@ ggplot(medits_biotime_mhw_dt%>% filter(is_les%in%1))+
 
 Model
 ```{r}
-test_1=glmmTMB(data=medits_biotime_mhw_dt_nis,
-        formula = log_n_ratio~ scale(DCI_P)+scale(year_of_mhw)+scale(annual_c_int)+scale(median_sst)+(1|country),
+test_1=glmmTMB(data=medits_biotime_mhw_dt_nis_added,
+        formula = log_n_ratio~
+          scale(CPI)+
+          scale(first_rec_year)+
+          scale(year_of_mhw)+
+          scale(annual_c_int)+
+          scale(median_sst)+
+          (1|country),
         family = "tweedie",
-        weights =log_n_pop,
+        #weights =log_n_pop,
         control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
 
 summary(test_1)
@@ -265,20 +288,29 @@ sjPlot::plot_model(test_1,type="pred",terms = "median_sst")
 MuMIn::r.squaredGLMM(test_1)
 
 #exp with year
-test_3=glmmTMB(data=medits_biotime_mhw_dt_nis,
-        formula = ratios~scale(DCI_P)+scale(year_of_mhw)+scale(median_sst)+scale(annual_c_int)+(1|country),
-        weights =log_n_pop, 
-        family = Gamma(link = "log"))
+test_1_beta = glmmTMB(data = medits_biotime_mhw_dt_nis_added,
+      formula = log_n_ratio ~
+        scale(CPI) +
+        scale(first_rec_year) +
+        scale(year_of_mhw) +
+        scale(annual_c_int) +
+        scale(median_sst) +
+        (1|country),
+      # zi argument for zero-inflation (often same predictors, but can be simpler)
+      # You must use the actual ratio (0 to 1), NOT the log ratio.
+      family = tweedie(link = "log"),
+      control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS"))
+)
 
-summary(test_3)
-performance::check_convergence(test_3)
-performance::check_singularity(test_3)
-performance::check_collinearity(test_3)
-plot(DHARMa::simulateResiduals(test_3))
-MuMIn::r.squaredGLMM(test_3)
-AIC(test_3)
-sjPlot::plot_model(test_3,type="eff",terms = "year_of_mhw")
-sjPlot::plot_model(test_3,type="eff",terms = "annual_c_int")
-sjPlot::plot_model(test_3,type="eff",terms = "median_sst")
+summary(test_1_beta)
+performance::check_convergence(test_1_beta)
+performance::check_singularity(test_1_beta)
+performance::check_collinearity(test_1_beta)
+plot(DHARMa::simulateResiduals(test_1_beta))
+MuMIn::r.squaredGLMM(test_1_beta)
+AIC(test_1_beta)
+sjPlot::plot_model(test_1_beta,type="pred",terms = "year_of_mhw")
+sjPlot::plot_model(test_1_beta,type="pred",terms = "annual_c_int")
+sjPlot::plot_model(test_1_beta,type="pred",terms = "median_sst")
 ```
 

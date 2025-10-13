@@ -575,427 +575,6 @@ filtered_data_before_first_record_dt <- final_data_clean_dt %>%
 
 
 #2.4) GLMMs
-##aggregated
-```{r}
-library(glmmTMB)
-
-#nbinom2
-test2_dt=glmmTMB(data = c_int_records_dt,formula = records~annual_c_int+(1|h3_id),family = "nbinom2",
-                 weights = weights)
-summary(test2_dt)
-performance::check_singularity(test2_dt)
-performance::check_convergence(test2_dt)
-sjPlot::plot_model(test2_dt,type="eff",terms="annual_c_int",show.data = F)+
-  theme_bw()
-plot(DHARMa::simulateResiduals(test2_dt))
-MuMIn::r.squaredGLMM(test2_dt)
-AIC(test2_dt)
-
-#nbinom
-test3_dt=glmmTMB(data = c_int_records_dt,
-                 formula = records~annual_c_int+(1|h3_id),
-                 family = "nbinom1",
-                 weights = weights)
-summary(test3_dt)
-performance::check_singularity(test3_dt)
-performance::check_convergence(test3_dt)
-sjPlot::plot_model(test3_dt,type="eff",terms="annual_c_int",show.data = F)
-plot(DHARMa::simulateResiduals(test3_dt))
-MuMIn::r.squaredGLMM(test3_dt)
-AIC(test3_dt)
-```
-
-Extract predicted of the best model
-```{r}
-test3_dt_gg=ggeffects::ggpredict(test3_dt,terms="annual_c_int[0:212 by=1]")
-```
-
-Plot
-```{r}
-# 1. Extract the p-value for 'annual_c_int'
-# The p-value is in the fixed effects part of the model summary.
-p_value <- summary(test3_dt)$coefficients$cond["annual_c_int", "Pr(>|z|)"]
-
-# 2. Extract the sample size (number of observations)
-N <- nobs(test3_dt)
-
-# 3. Create a formatted label string
-# Format the p-value to a specific number of decimal places (e.g., 3)
-p_label <- paste0("p-value ", format.pval(p_value, digits = 3, eps = 0.001))
-N_label <- paste0("n = ", N)
-
-# 4. Determine the position for the labels
-# These coordinates are illustrative; adjust them to fit your plot data.
-# Assuming x is from 0 to about 120 and y is on a log scale (say max 1000).
-x_pos <- max(c_int_records_dt$annual_c_int, na.rm = TRUE) * 0.95 # Near top-right
-y_pos_p <- max(c_int_records_dt$records, na.rm = TRUE) * 0.95 
-y_pos_N <- max(c_int_records_dt$records, na.rm = TRUE) * 0.7 # Adjust vertical separation on log scale
-
-# Convert y_pos to a single data frame for geom_text/annotate if preferred
-stats_df <- data.frame(
-  x = c(x_pos, x_pos),
-  y = c(y_pos_p, y_pos_N),
-  label = c(p_label, N_label)
-)
-
-#plot
-test3_dt_p=ggplot()+
-  geom_point(data=c_int_records_dt,
-             aes(x=annual_c_int,y=records),
-             color="grey",
-             alpha=0.5)+
-  geom_ribbon(data=test3_dt_gg,
-              aes(x=x,ymin=conf.low,ymax=conf.high),
-              alpha=0.3)+
-  geom_line(data=test3_dt_gg,
-            aes(x=x,y=predicted))+
-  scale_fill_gradient(low = "grey70", high = "red", guide = "none") +
-  theme_bw()+
-  #scale_y_log10()+
-  labs(x="Annual cumulative intensity (°C-days)",
-       y="New records within the analysis period") +
-  #coord_cartesian(ylim=c(0,3))+
-  # Add the labels using annotate() for fixed positions
-  annotate("text", x = 210, y = 16, 
-           label = p_label, 
-           hjust = 1, vjust = 1, size = 4) +
-  annotate("text", x = 210, y = 14, 
-           label = N_label, 
-           hjust = 1, vjust = 1, size = 4)+
-  ggbreak::scale_y_break(breaks=c(1,2),scales = c(2,0.5))+
-  scale_y_continuous(breaks=c(0,1,2,5,10,15,20))
-test3_dt_p
-ggsave(filename ="test3_dt_p.png" ,plot =test3_dt_p ,device = "jpeg",units = "cm",width = 15,height = 10)
-```
-
-##species_level
-###simple
-```{r}
-library(glmmTMB)
-#check pre singularity
-filtered_data_before_first_record_dt %>% 
-  group_by(species) %>% 
-  summarise(n = n()) %>% 
-  arrange(n) %>%  view# Check for groups with very small 'n'
-
-filtered_data_before_first_record_dt %>% 
-  group_by(h3_id) %>% 
-  summarise(n = n()) %>% 
-  arrange(n) %>% view # Check for groups with very small 'n'
-
-
-test_sp_dt=glmmTMB(data = filtered_data_before_first_record_dt,
-              formula = records~scale(sources)+scale(annual_c_int)+scale(median_sst)+(1|h3_id)+(1|species),
-              family = "binomial")#,
-       # control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
-
-summary(test_sp_dt)
-performance::check_singularity(test_sp_dt)
-performance::check_convergence(test_sp_dt)
-performance::check_collinearity(test_sp_dt)
-sjPlot::plot_model(test_sp_dt,type="eff",terms="annual_c_int",show.data = T)+
-  theme_bw()
-plot(DHARMa::simulateResiduals(test_sp_dt))
-MuMIn::r.squaredGLMM(test_sp_dt)
-AIC(test_sp_dt)
-
-test_sp_dt_gg=ggeffects::ggpredict(test_sp_dt,terms="annual_c_int [0:183 by=1]")
-```
-
-Plot species level
-```{r}
-# 1. Extract the p-value for 'annual_c_int'
-# The p-value is in the fixed effects part of the model summary.
-p_value_dt <- summary(test_sp_dt)$coefficients$cond["annual_c_int", "Pr(>|z|)"]
-
-# 2. Extract the sample size (number of observations)
-N <- nobs(test_sp_dt)
-
-# 3. Create a formatted label string
-# Format the p-value to a specific number of decimal places (e.g., 3)
-p_label_dt <- paste0("p-value ", format.pval(p_value_dt, digits = 3, eps = 0.0001))
-
-test_sp_dt_p=ggplot(filtered_data_before_first_record_dt)+
-  geom_point(aes(x=annual_c_int,y=records),
-             alpha=0.3,
-             color="grey")+
-  geom_ribbon(data=test_sp_dt_gg,
-              aes(x=x,ymin=conf.low,ymax=conf.high),
-              alpha=0.3,
-              fill="#E61316")+
-  geom_line(data=test_sp_dt_gg,
-              aes(x=x,y=predicted),
-            linewidth=1)+
-  labs(x="Annual cumulative intensity (°C-days)",
-       y="Record status",
-       title="B) Detrended baseline")+
-  theme_bw()+
-  annotate("text", x = 40, y = 0.9, 
-           label = p_label_dt, 
-           hjust = 1, vjust = 1, size = 4)# +
-  # annotate("text", x = 40, y = 0.8, 
-  #          label = N_label, 
-  #          hjust = 1, vjust = 1, size = 4)
-test_sp_dt_p
-ggsave(filename ="test_sp_dt_p.png" ,plot =test_sp_dt_p ,device = "jpeg",units = "cm",width = 15,height = 10)
-```
-
-###with time
-```{r}
-library(glmmTMB)
-
-cor.test(filtered_data_before_first_record_dt$year_of_mhws,filtered_data_before_first_record_dt$annual_c_int)
-
-test_sp_dt_time=glmmTMB(data = filtered_data_before_first_record_dt,
-              formula = records~annual_c_int+year_of_mhws+(1|h3_id)+(1|species),
-              family = "binomial",
-        control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
-
-summary(test_sp_dt_time)
-performance::check_singularity(test_sp_dt_time)
-performance::check_convergence(test_sp_dt_time)
-sjPlot::plot_model(test_sp_dt_time,type="eff",terms="annual_c_int",show.data = T)+
-  theme_bw()
-plot(DHARMa::simulateResiduals(test_sp_dt_time))
-MuMIn::r.squaredGLMM(test_sp_dt_time)
-AIC(test_sp_dt_time)
-
-test_sp_dt_time_gg=ggeffects::ggpredict(test_sp_dt_time,terms="annual_c_int [0:183 by=1]")
-```
-
-Plot
-```{r}
-# 1. Extract the p-value for 'annual_c_int'
-# The p-value is in the fixed effects part of the model summary.
-p_value_dt_time <- summary(test_sp_dt_time)$coefficients$cond["annual_c_int", "Pr(>|z|)"]
-
-# 2. Extract the sample size (number of observations)
-N <- nobs(test_sp_dt_time)
-
-# 3. Create a formatted label string
-# Format the p-value to a specific number of decimal places (e.g., 3)
-p_label_dt_time <- paste0("p-value ", format.pval(p_value_dt_time, digits = 3, eps = 0.0001))
-
-test_sp_dt_time_p=ggplot(filtered_data_before_first_record_dt)+
-  geom_point(aes(x=annual_c_int,y=records),
-             alpha=0.3,
-             color="grey")+
-  geom_ribbon(data=test_sp_dt_time_gg,
-              aes(x=x,ymin=conf.low,ymax=conf.high),
-              alpha=0.3,
-              fill="#E61316")+
-  geom_line(data=test_sp_dt_time_gg,
-              aes(x=x,y=predicted),
-            linewidth=1)+
-  labs(x="Annual cumulative intensity (°C-days)",
-       y="Record status",
-       title="C) Detrended baseline (time control)")+
-  theme_bw()+
-  annotate("text", x = 40, y = 0.9, 
-           label = p_label_dt_time, 
-           hjust = 1, vjust = 1, size = 4)# +
-  # annotate("text", x = 40, y = 0.8, 
-  #          label = N_label, 
-  #          hjust = 1, vjust = 1, size = 4)
-test_sp_dt_time_p
-ggsave(filename ="test_sp_dt_time_p.png" ,plot =test_sp_dt_time_p ,device = "jpeg",units = "cm",width = 15,height = 10)
-```
-
-Add the long term SST as a better representative of long-term warming than years
-```{r}
-annual_sst=read_rds(
-  "copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m//corrected_hex_level_data/final_data/all_hexagons_daily_summary_10m.rds") %>%
-  mutate(h3_id = str_remove(h3_id, "_cleaned"),
-         year_of_mhws=lubridate::year(date)) %>% 
-  group_by(h3_id,year_of_mhws) %>% 
-             summarise(median_sst=median(mean_sst_10m))
-
-#add the annual sst
-filtered_data_before_first_record_dt=read_rds("filtered_data_before_first_record_dt.rds")
-filtered_data_before_first_record_dt_sst=filtered_data_before_first_record_dt %>% 
-  left_join(annual_sst,by=c("h3_id","year_of_mhws")) %>% 
-  left_join(ormef_h3_id ,by=c("h3_id")) %>% 
-  mutate(weights=1/sources)
-write_rds(filtered_data_before_first_record_dt_sst,"filtered_data_before_first_record_dt_sst.rds")
-```
-
-###with sst
-```{r}
-test_sp_dt_time_sst=glmmTMB(
-  data = filtered_data_before_first_record_dt_sst,
-  formula = records~scale(sources)+scale(annual_c_int)+scale(year_of_mhws)+scale(median_sst)+(1|h3_id/year_of_mhws)+(1|species),
-  family = "betabinomial")#,
-  #ziformula = ~1)#,
-  #control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
-
-summary(test_sp_dt_time_sst)
-plot(DHARMa::simulateResiduals(test_sp_dt_time_sst))
-performance::check_singularity(test_sp_dt_time_sst)
-performance::check_convergence(test_sp_dt_time_sst)
-performance::check_collinearity(test_sp_dt_time_sst)
-#quick plot
-sjPlot::plot_model(test_sp_dt_time_sst,type="eff",terms="annual_c_int",show.data = T)+
-  theme_bw()
-
-sjPlot::plot_model(test_sp_dt_time_sst,type="eff",terms="year_of_mhws",show.data = T)+
-  theme_bw()
-
-sjPlot::plot_model(test_sp_dt_time_sst,type="eff",terms="median_sst",show.data = T)+
-  theme_bw()
-
-MuMIn::r.squaredGLMM(test_sp_dt_time_sst)
-AIC(test_sp_dt_time_sst)
-
-test_sp_dt_time_sst_gg_cint=ggeffects::ggpredict(
-  test_sp_dt_time_sst,
-  terms=c("annual_c_int [0:183 by =1]"))
-
-test_sp_dt_time_sst_gg_yr=ggeffects::ggpredict(
-  test_sp_dt_time_sst,
-  terms=c("year_of_mhws [1987:2022 by =1]"))
-
-test_sp_dt_time_sst_gg_sst=ggeffects::ggpredict(
-  test_sp_dt_time_sst,
-  terms=c("median_sst [14:24 by = 0.5]"))
-
-write_rds(test_sp_dt_time_sst_gg_cint,"test_sp_dt_time_sst_gg_cint.rds")
-write_rds(test_sp_dt_time_sst_gg_yr,"test_sp_dt_time_sst_gg_yr.rds")
-write_rds(test_sp_dt_time_sst_gg_sst,"test_sp_dt_time_sst_gg_sst.rds")
-```
-
-```{r}
-#c_intensity
-test_sp_dt_time_sst_cint_p=ggplot(filtered_data_before_first_record_dt_sst)+
-  geom_point(aes(x=annual_c_int,y=records),
-             alpha=0.3,
-             color="grey")+
-  geom_ribbon(data=test_sp_dt_time_sst_gg_cint,
-              aes(x=x,ymin=conf.low,ymax=conf.high),
-              alpha=0.3,
-              fill="#E61316")+
-  geom_line(data=test_sp_dt_time_sst_gg_cint,
-              aes(x=x,y=predicted),
-            linewidth=1)+
-  labs(x="Annual cumulative intensity (°C-days)",
-       y="Record status",
-       title="C) MHWs")+
-  theme_bw()
-test_sp_dt_time_sst_cint_p
-
-#years
-test_sp_dt_time_sst_yr_p=ggplot(filtered_data_before_first_record_dt_sst)+
-  geom_point(aes(x=year_of_mhws,y=records),
-             alpha=0.3,
-             color="grey")+
-  geom_ribbon(data=test_sp_dt_time_sst_gg_yr,
-              aes(x=x,ymin=conf.low,ymax=conf.high),
-              alpha=0.3,
-              fill="#E61316")+
-  geom_line(data=test_sp_dt_time_sst_gg_yr,
-              aes(x=x,y=predicted),
-            linewidth=1)+
-  labs(x="Year of MHW | SST",
-       y="Record status",
-       title="A) Time")+
-  theme_bw()
-test_sp_dt_time_sst_yr_p
-
-#SST
-test_sp_dt_time_sst_sst_p=ggplot(filtered_data_before_first_record_dt_sst)+
-  geom_point(aes(x=median_sst,y=records),
-             alpha=0.3,
-             color="grey")+
-  geom_ribbon(data=test_sp_dt_time_sst_gg_sst,
-              aes(x=x,ymin=conf.low,ymax=conf.high),
-              alpha=0.3,
-              fill="#E61316")+
-  geom_line(data=test_sp_dt_time_sst_gg_sst,
-              aes(x=x,y=predicted),
-            linewidth=1)+
-  labs(x="SST (°C)",
-       y="Record status",
-       title="B) SST")+
-  theme_bw()
-test_sp_dt_time_sst_sst_p
-```
-
-```{r}
-test_sp_dt_time_sst_grid=gridExtra::grid.arrange(
-  test_sp_dt_time_sst_yr_p,
-                        test_sp_dt_time_sst_sst_p,
-                        test_sp_dt_time_sst_cint_p,
-                        ncol = 2,
-                        nrow=2,
-  layout_matrix = rbind(c(1, 1,1,1), # Row 1: P1 and P2
-                        c(2,2,3,3)))
-
-test_sp_dt_time_sst_grid
-ggsave(filename ="test_sp_dt_time_sst_grid.png" ,plot =test_sp_dt_time_sst_grid ,device = "jpeg",units = "cm",width = 20,height = 14)
-```
-
-
-Plot proxy to monitoring effort
-```{r}
-# 2. Convert H3 IDs to Spatial Polygons (sf object)
-ormef_sf <- ormef_h3_id %>%
-  filter(h3_id%in%intersect(filtered_data_before_first_record_dt_sst$h3_id %>% unique(),ormef_h3_id_year$h3_id %>% unique)) %>% 
-  # Pass the entire data frame and specify the H3 column name
-  h3jsr::cell_to_polygon(
-    input = .,               # '.' refers to the incoming data frame
-    simple = FALSE           # Recommended for a tidy output
-  ) %>%
-  # The output is now a proper sf object, so st_set_crs works
-  sf::st_set_crs(4326)
-
-# 3. Get Mediterranean Land Boundaries for Context
-# Function from rnaturalearth
-world <-rnaturalearth:: ne_countries(scale = "large", returnclass = "sf")
-
-# 4. Create the ggplot map
-h3_map <- ggplot() +
-    # Plot the H3 Hexagons (your data)
-  geom_sf(
-    data = ormef_sf,
-    # Fills the hexagons based on the 'sources' count
-    aes(fill = sources), 
-    color = "black",     
-    linewidth = 0.1,     
-    alpha = 0.8          
-  ) +
-  # Add land boundaries first 
-  geom_sf(data = world, fill = "antiquewhite", color = "black", linewidth = 0.1) +
-  # Customize the color scale (from ggplot2 / viridis package, which tidyverse uses)
-  scale_fill_viridis_c(
-    name = "Sources",
-    option = "turbo"
-  ) +
-  # Set the map extent to focus on the Mediterranean Sea
-  coord_sf(
-    xlim = c(-6, 38),   
-    ylim = c(26, 48),  
-    expand = FALSE
-  ) +
-  # Apply a clean theme and labels
-  labs(
-    title = "A) Spatial distribution of sources",
-    x = "Longitude",
-    y = "Latitude"
-  ) +
-  theme_bw() +
-  theme(
-# --- CHANGE IS HERE ---
- # Moves the legend inside the plot using (x, y) coordinates
-legend.position = c(0.22, 0.17),
-# Optional: Makes the legend background transparent
-legend.background = element_rect(fill = "transparent", color = NA),
-legend.key.size = unit(0.25, "cm"),
-panel.grid.major = element_line(color = "skyblue", linewidth = 0.2),
-    panel.background = element_rect(fill = "skyblue", color = NA) 
-  )
-h3_map
-ggsave(filename ="h3_map.png" ,plot =h3_map ,device = "jpeg",units = "cm",width = 25,height = 12)
-```
-
 ###monitoring effort control
 Account for monitoring effort by years and h3_id
 This specifically accounts for the increased monitoring effort over time
@@ -1065,7 +644,11 @@ filtered_data_before_first_record_dt_sst_meff=read_rds("filtered_data_before_fir
   left_join(read.csv("dci_index.csv") %>% 
               select(h3_id,
                      DCI_P),
-            by="h3_id")
+            by="h3_id") %>% 
+  left_join(read.csv("cpi_data_with_C.csv") %>% 
+              select(h3_id,
+                     CPI),
+            by = join_by(h3_id))
 
 year_of_f_rec=ormef %>% 
   group_by(Species) %>% 
@@ -1088,6 +671,12 @@ filtered_data_before_first_record_dt_sst_meff=filtered_data_before_first_record_
                                   species%in%"Cryptocentrus steinhardti"~2012,
                                   species%in%"Sargocentron caudimaculatum"~2021,
                                   TRUE~first_rec_year))
+
+species_yfr=filtered_data_before_first_record_dt_sst_meff %>% 
+  select(species,first_rec_year) %>% 
+  distinct(species,first_rec_year)
+
+#write.csv(species_yfr,"species_yfr.csv",row.names = F)
 ```
 
 I am going to add current-weighted distance to the source variable.
@@ -1096,26 +685,54 @@ test_sp_dt_time_sst_mon_eff=glmmTMB(
   data = filtered_data_before_first_record_dt_sst_meff,
   formula = records~
     scale(first_rec_year)+
-    scale(DCI_P)+
+    scale(CPI)+
     scale(sources)+
     scale(annual_c_int)+
     scale(year_of_mhws)+
     scale(median_sst)+
     (1|h3_id)+
     (1|species),
-  family = "betabinomial")#,#,
-  #ziformula = ~1)#,
+  family = "betabinomial")#,
   #control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
-#write_rds(test_sp_dt_time_sst_mon_eff,"test_sp_dt_time_sst_mon_eff.rds")
-test_sp_dt_time_sst_mon_eff=read_rds("glmms\\test_sp_dt_time_sst_mon_eff\\test_sp_dt_time_sst_mon_eff.rds")
+#write_rds(test_sp_dt_time_sst_mon_eff,"test_sp_dt_time_sst_mon_eff_cpi.rds")
+test_sp_dt_time_sst_mon_eff=read_rds("glmms\\test_sp_dt_time_sst_mon_eff_cpi/test_sp_dt_time_sst_mon_eff_cpi.rds")
 summary(test_sp_dt_time_sst_mon_eff)
 plot(DHARMa::simulateResiduals(test_sp_dt_time_sst_mon_eff))
 performance::check_singularity(test_sp_dt_time_sst_mon_eff)
 performance::check_convergence(test_sp_dt_time_sst_mon_eff)
 performance::check_collinearity(test_sp_dt_time_sst_mon_eff)
-test_sp_dt_time_sst_mon_eff_r2=MuMIn::r.squaredGLMM(test_sp_dt_time_sst_mon_eff)
-test_sp_dt_time_sst_mon_eff_r2
+MuMIn::r.squaredGLMM(test_sp_dt_time_sst_mon_eff)
+
 AIC(test_sp_dt_time_sst_mon_eff)
+
+#AIC with DPIp - 7689.4
+#AIC with CPI - 7689.608
+
+#Summarise table for the model
+fixed_effects_df <- broom.mixed::tidy(test_sp_dt_time_sst_mon_eff, effects = "fixed") %>%
+  # Select and rename columns to match the request
+  select(
+    Variable = term,
+    Coefficient = estimate,
+    `Std. Error` = std.error,
+    `Z Value` = statistic,
+    `P Value` = p.value
+  ) %>%
+  # Format numeric columns for clean presentation (e.g., 3 decimal places)
+  mutate(
+    Coefficient = round(Coefficient, 3),
+    `Std. Error` = round(`Std. Error`, 3),
+    `Z Value` = round(`Z Value`, 2),
+    `P Value` = format.pval(`P Value`, digits = 3, eps = 0.0001)
+  )
+#random effects
+random_effects_df <- broom.mixed::tidy(test_sp_dt_time_sst_mon_eff, effects = "ran_pars") 
+
+#write.csv(fixed_effects_df,"fixed_effects_df.csv",row.names = F)
+
+#Binomial model: AIC = 7687.6
+#Betabinomial model: AIC = 7689.6
+#Delta is 2 - models are quite similar - I am chossing base on r^2
 ```
 
 Extract predictions
@@ -1136,9 +753,9 @@ test_sp_dt_time_sst_mon_eff_gg_source=ggeffects::ggpredict(
   test_sp_dt_time_sst_mon_eff,
   terms=c("sources [0:6 by = 1]"))
 
-test_sp_dt_time_sst_mon_eff_gg_dcip=ggeffects::ggpredict(
+test_sp_dt_time_sst_mon_eff_gg_cpi=ggeffects::ggpredict(
   test_sp_dt_time_sst_mon_eff,
-  terms=c("DCI_P [-0.06:0.06 by = 0.001]"))
+  terms=c("CPI [-0.09:0.09 by = 0.001]"))
 
 test_sp_dt_time_sst_mon_eff_gg_yfr=ggeffects::ggpredict(
   test_sp_dt_time_sst_mon_eff,
@@ -1152,8 +769,8 @@ write_rds(test_sp_dt_time_sst_mon_eff_gg_sst,
           "test_sp_dt_time_sst_mon_eff_gg_sst.rds")
 write_rds(test_sp_dt_time_sst_mon_eff_gg_source,
           "test_sp_dt_time_sst_mon_eff_gg_source.rds")
-write_rds(test_sp_dt_time_sst_mon_eff_gg_dcip,
-          "test_sp_dt_time_sst_mon_eff_gg_dcip.rds")
+write_rds(test_sp_dt_time_sst_mon_eff_gg_cpi,
+          "test_sp_dt_time_sst_mon_eff_gg_cpi.rds")
 write_rds(test_sp_dt_time_sst_mon_eff_gg_yfr,
           "test_sp_dt_time_sst_mon_eff_gg_yfr.rds")
 ```
@@ -1300,44 +917,26 @@ test_sp_dt_time_sst_mon_eff_source_p=ggplot(filtered_data_before_first_record_dt
   theme_bw()+
   theme(axis.title.y = element_blank())
 
-#Source
-test_sp_dt_time_sst_mon_eff_source_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
-  geom_point(aes(x=sources,y=records),
+#CPI
+test_sp_dt_time_sst_mon_eff_cpi_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+  geom_point(aes(x=CPI,y=records),
              alpha=0.3,
              color="grey")+
-  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_gg_source,
+  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_gg_cpi,
               aes(x=x,ymin=conf.low,ymax=conf.high),
               alpha=0.3,
               fill="#E61316")+
-  geom_line(data=test_sp_dt_time_sst_mon_eff_gg_source,
+  geom_line(data=test_sp_dt_time_sst_mon_eff_gg_cpi,
               aes(x=x,y=predicted),
             linewidth=1)+
-  labs(x="Sources",
+  labs(x="CPI (m/s)",
        y="Probability of record occurrence",
-       title="A) Sources")+
+       title="B) Current Propagation Index")+
   theme_bw()+
   theme(axis.title.y = element_blank())
+test_sp_dt_time_sst_mon_eff_cpi_p
 
-#Source
-test_sp_dt_time_sst_mon_eff_dcip_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
-  geom_point(aes(x=DCI_P,y=records),
-             alpha=0.3,
-             color="grey")+
-  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_gg_dcip,
-              aes(x=x,ymin=conf.low,ymax=conf.high),
-              alpha=0.3,
-              fill="#E61316")+
-  geom_line(data=test_sp_dt_time_sst_mon_eff_gg_dcip,
-              aes(x=x,y=predicted),
-            linewidth=1)+
-  labs(x="DCIp (m/s)",
-       y="Probability of record occurrence",
-       title="B) Distance-penalized Directional Current Index")+
-  theme_bw()+
-  theme(axis.title.y = element_blank())
-test_sp_dt_time_sst_mon_eff_dcip_p
-
-#Source
+#Year of first record
 test_sp_dt_time_sst_mon_eff_yfr_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
   geom_point(aes(x=first_rec_year,y=records),
              alpha=0.3,
@@ -1353,27 +952,47 @@ test_sp_dt_time_sst_mon_eff_yfr_p=ggplot(filtered_data_before_first_record_dt_ss
        y="Probability of record occurrence",
        title="C) Year of first record")+
   theme_bw()+
-  theme(axis.title.y = element_blank())
+  theme(axis.title.y = element_blank())+
+    scale_x_continuous(breaks = seq(1920,2020,by=20))
 test_sp_dt_time_sst_mon_eff_yfr_p
+
+#YFR zoom
+test_sp_dt_time_sst_mon_eff_yfr_p_zoom=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+  geom_ribbon(data=test_sp_dt_time_sst_mon_eff_gg_yfr,
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=test_sp_dt_time_sst_mon_eff_gg_yfr,
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  theme_bw()+
+  coord_cartesian(ylim=c(0,.08))+
+  scale_y_continuous(breaks = seq(0,0.08,by=0.04))+
+  scale_x_continuous(breaks = seq(1920,2020,by=20))+
+  theme(axis.title = element_blank(),
+        plot.background = element_rect(fill = "transparent", colour = NA))
+
+#embed yfr
+embeded_yfr <- test_sp_dt_time_sst_mon_eff_yfr_p +
+  annotation_custom(ggplotGrob(test_sp_dt_time_sst_mon_eff_yfr_p_zoom),
+                    xmin = 1940, xmax = 2000,
+                    ymin = 0.1, ymax = 0.9)+
+  theme(axis.title.y = element_blank())
 ```
 
-
-###Test - no time
+Non climatic panel
 ```{r}
-test_sp_dt_time_sst_mon_eff_no_year=glmmTMB(
-  data = filtered_data_before_first_record_dt_sst_meff,
-  formula = records~scale(sources)+scale(annual_c_int)+scale(median_sst)+(1|h3_id)+(1|species),
-  family = "betabinomial")#,
-  #ziformula = ~1)#,
-  #control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
+test_sp_dt_time_sst_mon_eff_grid_nc=gridExtra::grid.arrange(
+  left="Probability of record occurrence",
+  test_sp_dt_time_sst_mon_eff_source_p,
+  test_sp_dt_time_sst_mon_eff_cpi_p,
+  embeded_yfr,
+  layout_matrix = rbind(c(1), # Row 1: P1 and P2
+                        c(2),
+                        c(3)))
 
-summary(test_sp_dt_time_sst_mon_eff_no_year)
-plot(DHARMa::simulateResiduals(test_sp_dt_time_sst_mon_eff_no_year))
-performance::check_singularity(test_sp_dt_time_sst_mon_eff_no_year)
-performance::check_convergence(test_sp_dt_time_sst_mon_eff_no_year)
-performance::check_collinearity(test_sp_dt_time_sst_mon_eff_no_year)
-AIC(test_sp_dt_time_sst_mon_eff_no_year)
-test_sp_dt_time_sst_mon_eff_no_year_r2=MuMIn::r.squaredGLMM(test_sp_dt_time_sst_mon_eff_no_year)
+
+ggsave(filename ="test_sp_dt_time_sst_mon_eff_grid_nc.png" ,plot =test_sp_dt_time_sst_mon_eff_grid_nc ,device = "jpeg",units = "cm",width = 15,height = 20)
 ```
 
 ###Plot used records
@@ -1508,5 +1127,176 @@ intro_grid=gridExtra::grid.arrange(
 
 intro_grid
 ggsave(filename ="intro_grid.png" ,plot =intro_grid ,device = "jpeg",units = "cm",width = 20,height = 20)
+```
+
+
+##dredge
+```{r}
+# Dredge searches all possible combinations of fixed effects.
+# It automatically keeps the random effects ((1|h3_id) + (1|species)) in ALL models.
+
+# 1.1 Set MuMIn's options to prevent NA's from failing the model
+# This is crucial for dredge()
+options(na.action = "na.fail")
+
+# It also generates the null model (intercept only) and the global model (all fixed effects).
+cat("\nPerforming Model Dredging (comparing all 64 models)...\n")
+model_selection_table <-MuMIn::dredge(
+  test_sp_dt_time_sst_mon_eff,
+  rank = "AICc" # Use AIC corrected for small sample sizes
+)
+
+write_rds(model_selection_table,"model_selection_table.rds")
+write.csv(model_selection_table %>% as_tibble(),"model_selection_table.csv",row.names = F)
+
+# ==============================================================================
+# STEP 3: MANUAL FILTERING AND AIC WEIGHT CALCULATION
+# ==============================================================================
+cat("\n-- Filtering and Recalculating Weights for Converged Models --\n")
+
+# 3.1 Filter out all models that failed to converge (where AICc is NA)
+valid_models <- subset(model_selection_table, !is.na(AICc))
+
+# 3.2 Recalculate Delta AICc based ONLY on the converged models' best score
+# This ensures delta=0 corresponds to the best CONVERGED model
+min_AICc <- min(valid_models$AICc)
+valid_models$delta <- valid_models$AICc - min_AICc
+
+valid_models=valid_models %>% 
+  as.data.frame()
+valid_models$weight=as.numeric(valid_models$weight)
+# 3.3 Manually Calculate Akaike Weights (Formula: exp(-0.5 * delta) / sum(exp(-0.5 * delta)))
+# This is equivalent to MuMIn's weight() function, applied to the subset
+valid_models=valid_models %>% 
+  mutate(weight=exp(-0.5 * valid_models$delta) / sum(exp(-0.5 * valid_models$delta))) %>%
+    mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+# Sort the valid models by the newly calculated AICc rank
+valid_models <- valid_models[order(valid_models$AICc), ]
+print(failed_models)
+
+#write.csv(valid_models,"valid_selected_models.csv",row.names = F)
+
+# ==============================================================================
+# STEP 4: OUTPUT RESULTS
+# ==============================================================================
+
+cat("\n=======================================================\n")
+cat(paste0(" MODEL SELECTION TABLE (N=", nrow(valid_models), " Converged Models) "))
+cat("\n=======================================================\n")
+
+# Print the top 10 *converged* models
+print(head(valid_models, n = 10))
+
+cat("\nInterpretation:\n")
+cat(" - The AICc, delta, and weight columns are now only calculated for the 46 converged models.\n")
+cat(" - delta: The difference in AICc between a model and the best CONVERGED model (delta=0).\n")
+cat(" - weight: The Akaike weight, showing the probability of being the best model in this set.\n")
+
+# Calculate variable importance (Sum of weights for each predictor)
+# We must use the original sw() function on the VALID models
+importance_ranking <- MuMIn::sw(valid_models)
+cat("\n=======================================================\n")
+cat("             RELATIVE VARIABLE IMPORTANCE              \n")
+cat("=======================================================\n")
+# Importance close to 1 indicates the variable is in all or most top-ranking models.
+print(importance_ranking)
+
+# Reset global options
+options(na.action = "na.omit")
+```
+
+###test with DCIp
+```{r}
+test_sp_dt_time_sst_mon_eff_dcip=glmmTMB(
+  data = filtered_data_before_first_record_dt_sst_meff,
+  formula = records~
+    scale(first_rec_year)+
+    scale(DCI_P)+
+    scale(sources)+
+    scale(annual_c_int)+
+    scale(year_of_mhws)+
+    scale(median_sst)+
+    (1|h3_id)+
+    (1|species),
+  family = "betabinomial")
+test_sp_dt_time_sst_mon_eff_dcip %>% summary
+```
+
+####dredge - dcip
+```{r}
+
+# Dredge searches all possible combinations of fixed effects.
+# It automatically keeps the random effects ((1|h3_id) + (1|species)) in ALL models.
+
+# 1.1 Set MuMIn's options to prevent NA's from failing the model
+# This is crucial for dredge()
+options(na.action = "na.fail")
+
+# It also generates the null model (intercept only) and the global model (all fixed effects).
+cat("\nPerforming Model Dredging (comparing all 64 models)...\n")
+model_selection_table_dcip <-MuMIn::dredge(
+  test_sp_dt_time_sst_mon_eff_dcip,
+  rank = "AICc" # Use AIC corrected for small sample sizes
+)
+model_selection_table_dcip
+write_rds(model_selection_table_dcip,"model_selection_table_dcip.rds")
+write.csv(model_selection_table_dcip %>% as_tibble(),"model_selection_table_dcip.csv",row.names = F)
+
+# ==============================================================================
+# STEP 3: MANUAL FILTERING AND AIC WEIGHT CALCULATION
+# ==============================================================================
+cat("\n-- Filtering and Recalculating Weights for Converged Models --\n")
+
+# 3.1 Filter out all models that failed to converge (where AICc is NA)
+valid_models_dcip <- subset(model_selection_table_dcip, !is.na(AICc))
+
+# 3.2 Recalculate Delta AICc based ONLY on the converged models' best score
+# This ensures delta=0 corresponds to the best CONVERGED model
+min_AICc <- min(valid_models_dcip$AICc)
+valid_models_dcip$delta <- valid_models_dcip$AICc - min_AICc
+
+valid_models_dcip=valid_models_dcip %>% 
+  as.data.frame()
+valid_models_dcip$weight=as.numeric(valid_models_dcip$weight)
+# 3.3 Manually Calculate Akaike Weights (Formula: exp(-0.5 * delta) / sum(exp(-0.5 * delta)))
+# This is equivalent to MuMIn's weight() function, applied to the subset
+valid_models_dcip=valid_models_dcip %>% 
+  mutate(weight=exp(-0.5 * valid_models_dcip$delta) / sum(exp(-0.5 * valid_models_dcip$delta))) %>%
+    mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+# Sort the valid models by the newly calculated AICc rank
+valid_models_dcip <- valid_models_dcip[order(valid_models_dcip$AICc), ]
+print(failed_models)
+
+#write.csv(valid_models_dcip,"valid_selected_models_dcip.csv",row.names = F)
+
+# ==============================================================================
+# STEP 4: OUTPUT RESULTS
+# ==============================================================================
+
+cat("\n=======================================================\n")
+cat(paste0(" MODEL SELECTION TABLE (N=", nrow(valid_models), " Converged Models) "))
+cat("\n=======================================================\n")
+
+# Print the top 10 *converged* models
+print(head(valid_models_dcip, n = 10))
+
+cat("\nInterpretation:\n")
+cat(" - The AICc, delta, and weight columns are now only calculated for the 46 converged models.\n")
+cat(" - delta: The difference in AICc between a model and the best CONVERGED model (delta=0).\n")
+cat(" - weight: The Akaike weight, showing the probability of being the best model in this set.\n")
+
+# Calculate variable importance (Sum of weights for each predictor)
+# We must use the original sw() function on the VALID models
+importance_ranking <- MuMIn::sw(valid_models_dcip)
+cat("\n=======================================================\n")
+cat("             RELATIVE VARIABLE IMPORTANCE              \n")
+cat("=======================================================\n")
+# Importance close to 1 indicates the variable is in all or most top-ranking models.
+print(importance_ranking)
+
+# Reset global options
+options(na.action = "na.omit")
 ```
 
