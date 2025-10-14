@@ -11,40 +11,123 @@ library(tidyverse)
 options(scipen = 999)
 ```
 
+Function
+```{r}
+# Function to convert longitude to decimal degrees
+convert_to_decimal_degrees <- function(longitude) {
+  degrees <- floor(longitude / 100)
+  minutes <- longitude %% 100
+  decimal_degrees <- degrees + minutes / 60
+  return(decimal_degrees)
+}
+```
+
+
 Records data
 ```{r}
-records_lite=read.csv("C:\\Users\\User\\Desktop\\research\\Mentoring and colaborations\\Georgous\\MHW_NIS\\records_data.csv", fileEncoding = "latin1") %>% 
+#new
+#manual fixes:
+#Stephanolepis diaspros - Lesvos - lat fix
+#Planiliza carinata - Lebanon - lat and long in lat
+#Sphyraena chrysotaenia - montenegro - lat and long in lat
+#Plotosus lineatus - 2018 - lat and long in lat
+#Plotosus lineatus - 2022 - lat and long in lat
+#fixed for two turkish records using degree. minutes, second sign
+#Pempheris rhomboidea  -2008 - fix " 34.184593            5
+#Ostorhinchus fasciatus - 2014 - add dots - Cyprus
+#Sargocentron rubrum  - 2015 - add dots lebanon
+#Siganus rivulatus 2008 - add dots - lebanon
+# Stephanolepis diaspros - 2006 - add dots - cyprus
+# Jaydia smithi - 2009 - add dots - tureky and the next below:
+   #Jaydia smithi - 2010
+   # Jaydia smithi - 2010
+#Fix format in Platycephalus indicus - Lebanon 2011
+#Fix  format in Pomacanthus imperator Egypt 2019
+#old
+records_lite=read.csv("C:\\Users\\User\\Desktop\\research\\Mentoring and colaborations\\Georgous\\MHW_NIS\\records data/raw/New coordinates 8.10.25.csv", fileEncoding = "latin1") %>% 
   select(species,
          year,
-         lat,
-         long) %>%
-  mutate(year = if_else(trimws(year) == "" | str_detect(year, "[<>]") | str_detect(year, "\\?\\?\\?"),
+         lat=`Latitude.1`,
+         long=`Longitude.1`,
+         country=CounTurkeyy,
+         coll.date,
+         individuals=Abundance..n.specimens.) %>%
+  #removing leading and trailing whitespace 
+  #three question marks (???) 
+  mutate(year =if_else(trimws(year) == "" | str_detect(year, "[<>]") | str_detect(year, "\\?\\?\\?"),
                          NA_character_, year),
          lat = if_else(trimws(lat) == ""| str_detect(lat, "[<>]") | str_detect(lat, "\\?\\?\\?"), NA_character_, lat),
          long = if_else(trimws(long) == ""| str_detect(long, "[<>]") | str_detect(long, "\\?\\?\\?"), NA_character_, long)) %>% 
-  filter(!year%in%"date??",
-         !lat%in%" 34.184593            5")
-
-records_lite$lat=as.numeric(records_lite$lat)
-records_lite$long=as.numeric(records_lite$long)
-records_lite$year=as.numeric(records_lite$year)
-
-records_lite=records_lite %>% #fix wrong inserted years
+  filter(!year%in%"date??") %>% 
+  mutate(year=as.numeric(year),
+         lat=as.numeric(lat),
+         long=as.numeric(long)) %>% 
   mutate(year=case_when(year==2029~2020,
                         year==20161~2016,
                         TRUE~year)) %>% 
-  filter(!lat==long,#fix wrong coords when lat equals long
-         !lat<30.26,#only the Med. borders
+  filter(year>1987) %>% 
+  drop_na() %>% 
+  #fix medits format
+  mutate(lat=if_else(lat>46,
+                     convert_to_decimal_degrees(lat),
+                     lat),
+         long=if_else(long>39,
+                     convert_to_decimal_degrees(long),
+                     long)) %>% #fix wrong inserted years
+  filter(!lat<30.26,#only the Med. borders
          !lat>45.78,
          !long>36.22,
-         !long<(-6.03),
-         year>1987#for the daily SST laryer med-cmcc-tem-rean-d from "Mediterranean Sea - High Resolution Diurnal Subskin Sea Surface Temperature Analysis. E.U. Copernicus Marine Service Information (CMEMS). Marine Data Store (MDS). DOI: 10.48670/moi-00170 (Accessed on 04 Jul 2023)"
-         ) %>% 
-  drop_na()
+         !long<(-6.03))
 
 
-write.csv(records_lite,"records_cleaned.csv",row.names = F)
+write.csv(records_lite,"records_cleaned_8_10_2025.csv",row.names = F)
 ```
+
+Harmonize species names
+```{r}
+records_lite_harm_bdc= 
+  bdc::bdc_query_names_taxadb(
+  unique(records_lite$species),
+  suggest_names = T)
+
+Harmonization_fix=records_lite_harm_bdc %>% 
+  mutate(
+    scientificName=case_when(
+      original_search%in%"Cryptocentrus steinhardti"~"Cryptocentrus steinhardti",
+      original_search%in%"Parupenaeus forskalii"~"Parupeneus forsskali",
+      original_search%in%"Sargocentron sp."~"remove_me",
+      original_search%in%"Siganus luridus                                                                                     "~"Siganus luridus",
+      original_search%in%"Siganus luridus  "~"Siganus luridus",
+      original_search%in%"Siganus luridus   "~"Siganus luridus",
+      original_search%in%"Sphyraena chrysotaenia /  flavicauda "~"remove_me",
+      original_search%in%"Planiliza carinata "~"Planiliza carinata",
+      original_search%in%"Equulites popei"~"Equulites popei",
+      original_search%in%"Planiliza carinata"~"Planiliza carinata",
+      original_search%in%"Callionymus filamentosus (Valenciennes, 1837)"~"Callionymus filamentosus",
+      original_search%in%"Hippocampus kuda ex H.fuscus"~"Hippocampus kuda",
+      original_search%in%"Hippocampus kuda ex H. fuscus"~"Hippocampus kuda",
+      TRUE~scientificName)) %>% 
+  filter(!scientificName%in%"remove_me") %>% 
+  select(species=original_search,
+         corrected=scientificName) %>% 
+  mutate(is_cahnged=species==corrected)
+```
+
+Join harmonized
+```{r}
+records_lite_harm=records_lite %>% 
+  left_join(Harmonization_fix %>% select(species,corrected),
+            by="species") %>% 
+  drop_na() %>% 
+  select(-species) %>% 
+  rename(species=corrected) %>% 
+  select(species,year,lat,long,country,coll.date,individuals) %>% 
+  mutate(h3_id = h3::geo_to_h3(c(lat,long), res = 3))
+
+write.csv(records_lite_harm,"records_cleaned_harm_8_10_25.csv",row.names = F)
+```
+
+
 
 Extrat the h3 IDs of which climatic data is needed
 ```{r}

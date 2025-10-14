@@ -645,7 +645,7 @@ filtered_data_before_first_record_dt_sst_meff=read_rds("filtered_data_before_fir
               select(h3_id,
                      DCI_P),
             by="h3_id") %>% 
-  left_join(read.csv("cpi_data_with_C.csv") %>% 
+  left_join(read.csv("cpi_data_with_C_all.csv") %>% 
               select(h3_id,
                      CPI),
             by = join_by(h3_id))
@@ -692,8 +692,10 @@ test_sp_dt_time_sst_mon_eff=glmmTMB(
     scale(median_sst)+
     (1|h3_id)+
     (1|species),
-  family = "betabinomial")#,
-  #control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS")))
+  family = "betabinomial",
+  control = glmmTMBControl(optimizer = optim,
+                           optArgs = list(method = "BFGS",
+                                          maxit = 10000)))
 #write_rds(test_sp_dt_time_sst_mon_eff,"test_sp_dt_time_sst_mon_eff_cpi.rds")
 test_sp_dt_time_sst_mon_eff=read_rds("glmms\\test_sp_dt_time_sst_mon_eff_cpi/test_sp_dt_time_sst_mon_eff_cpi.rds")
 summary(test_sp_dt_time_sst_mon_eff)
