@@ -35,8 +35,8 @@ ormef <- read.delim("C:\\Users\\User\\Desktop\\research\\data\\ORMEF\\89476.tsv"
     input = sf::st_as_sf(.,
                          coords = c("Decimal_Long", "Decimal_Lat"),
                          crs = 4326),
-    res = 3)) %>% 
-  filter(Category %in%"EXOTIC CAN")
+    res = 3))# %>%  #keep all sources even if non Lessepsian related
+ # filter(Category %in%"EXOTIC CAN")
 
 ormef_h3_id=ormef %>% 
   group_by(h3_id) %>% 
@@ -45,9 +45,6 @@ ormef_h3_id=ormef %>%
 ormef_h3_id_year=ormef %>% 
   group_by(h3_id,Year) %>% 
   summarise(sources=n_distinct(Reference))
-
-ggplot(ormef_h3_id_year)+
-  geom_point(aes(x=Year,y=sources))
 ```
 
 #1.1) annual cumulative intensity
@@ -73,51 +70,12 @@ annual_c_int=clim %>%
 #1.2) Records data
 Add records data
 ```{r}
-records=read_csv("records_cleaned.csv") %>% 
-  mutate(
-    h3_id = h3jsr::point_to_cell(
-      input = sf::st_as_sf(., coords = c("long", "lat"), crs = 4326),
-      res = 3)) %>% 
+records=read_csv("records data/cleaned/records_cleaned_harm_8_10_25.csv") %>% 
   #remove marmara and black sea records that are not in the climatic model
   filter(!h3_id%in%c("831ec8fffffffff", "831ec9fffffffff", "832d05fffffffff"))
 
-#Harmonize species
-records_harm=bdc::bdc_query_names_taxadb(
-  unique(records$species),
-  suggest_names = T) %>% 
-  select(original_search,suggested_name,notes,scientificName,family) %>% 
-  mutate(is_similar=original_search==scientificName)
-
-#replace corrected names
-records_harm_corr=records_harm %>% 
-  mutate(
-    scientificName=case_when(
-      original_search%in%"Callionymus filamentosus (Valenciennes, 1837)"~"Callionymus filamentosus",
-      original_search%in%"Cryptocentrus steinhardti"~"Cryptocentrus steinhardti",
-      original_search%in%"Hippocampus kuda ex H.fuscus"~"Hippocampus kuda",
-      original_search%in%"Hippocampus kuda ex H. fuscus"~"Hippocampus kuda",
-      original_search%in%"Parupenaeus forskalii"~"Parupeneus forsskali",
-      original_search%in%"Equulites popei"~"Equulites popei",                                   original_search%in%"Planiliza carinata"~"Planiliza carinata",
- 
-      TRUE~scientificName)) %>% 
-  filter(!original_search%in%c("Sargocentron sp.",
-                               "Sphyraena chrysotaenia /  flavicauda"))
-
-#write.csv(records_harm_corr,"records_harm_corr.csv",row.names = F)
-#Fix the records data
-records_fix=records %>% 
-  left_join(records_harm_corr %>% 
-              rename(species=original_search,
-                     species_corr=scientificName) %>% 
-              select(species,species_corr),
-            by="species") %>% 
-  select(-species) %>% 
-  rename(species=species_corr)
-
-#write.csv(records_fix,"records_cleaned_harm.csv",row.names = F)
-
 #For every h3_id, year,lat, and long keep only the first record
-records_min=records_fix %>% 
+records_min=records %>% 
   group_by(h3_id,species) %>% 
   filter(year%in%min(year)) %>% 
  #For any remaining groups (h3_id/species) with multiple records in the minimum year, keep only the first one
@@ -131,7 +89,7 @@ records_min_count=records_min %>%
   rename(year_of_records=year)
 
 #records_sp_level
-records_min_sp_level=records_fix %>% 
+records_min_sp_level=records %>% 
   group_by(h3_id,species) %>% 
   filter(year%in%min(year)) %>% 
  #For any remaining groups (h3_id/species) with multiple records in the minimum year, keep only the first one
@@ -266,10 +224,17 @@ filtered_data_before_first_record <- final_data_clean %>%
   # 5. Remove the helper column and ungroup
   select(-first_record_year) %>%
   ungroup() %>%
-  filter(!is.na(species))
+  filter(!is.na(species)) %>% 
+  group_by(h3_id,species) %>%
+  filter(sum(records)>0) %>% 
+  ungroup()
 
+
+#Check that there are no species with zero sum across hexagons and years
+filtered_data_before_first_record %>% 
+  group_by(h3_id,species) %>% 
+  summarise(sum=sum(records)) %>% view
 #write_rds(filtered_data_before_first_record,"filtered_data_before_first_record.rds")
-
 ```
 
 Explore
@@ -285,167 +250,9 @@ ggplot(c_int_records)+
 ```
 
 #1.4) GLMMs
-##aggregated
-```{r eval=FALSE, include=FALSE}
-library(glmmTMB)
-
-#nbinom2
-test2=glmmTMB(data = c_int_records,formula = records~annual_c_int+(1|h3_id),family = "nbinom2",weights = weights)
-summary(test2)
-performance::check_singularity(test2)
-performance::check_convergence(test2)
-sjPlot::plot_model(test2,type="eff",terms="annual_c_int",show.data = F)+
-  theme_bw()
-plot(DHARMa::simulateResiduals(test2))
-MuMIn::r.squaredGLMM(test2)
-AIC(test2)
-
-#nbinom
-test3=glmmTMB(data = c_int_records,formula = records~annual_c_int+(1|h3_id),family = "nbinom1")
-summary(test3)
-sjPlot::plot_model(test3,type="eff",terms="annual_c_int",show.data = F)
-plot(DHARMa::simulateResiduals(test3))
-MuMIn::r.squaredGLMM(test3)
-AIC(test3)
-```
-
-Extract predicted of the best model
-```{r}
-test2_gg=ggeffects::ggpredict(test2,terms="annual_c_int[0:381 by=1]")
-```
-
-Plot
-```{r}
-# 1. Extract the p-value for 'annual_c_int'
-# The p-value is in the fixed effects part of the model summary.
-p_value <- summary(test2)$coefficients$cond["annual_c_int", "Pr(>|z|)"]
-
-# 2. Extract the sample size (number of observations)
-N <- nobs(test2)
-
-# 3. Create a formatted label string
-# Format the p-value to a specific number of decimal places (e.g., 3)
-p_label <- paste0("p-value ", format.pval(p_value, digits = 3, eps = 0.001))
-N_label <- paste0("n = ", N)
-
-# 4. Determine the position for the labels
-# These coordinates are illustrative; adjust them to fit your plot data.
-# Assuming x is from 0 to about 120 and y is on a log scale (say max 1000).
-x_pos <- max(c_int_records_dt$annual_c_int, na.rm = TRUE) * 0.95 # Near top-right
-y_pos_p <- max(c_int_records_dt$records, na.rm = TRUE) * 0.95 
-y_pos_N <- max(c_int_records_dt$records, na.rm = TRUE) * 0.7 # Adjust vertical separation on log scale
-
-# Convert y_pos to a single data frame for geom_text/annotate if preferred
-stats_df <- data.frame(
-  x = c(x_pos, x_pos),
-  y = c(y_pos_p, y_pos_N),
-  label = c(p_label, N_label)
-)
-
-#plot
-test2_p=ggplot()+
-  geom_point(data=c_int_records,
-             aes(x=annual_c_int,y=records),
-             color="grey",
-             alpha=0.5)+
-  geom_ribbon(data=test2_gg,
-              aes(x=x,ymin=conf.low,ymax=conf.high),
-              alpha=0.3)+
-  geom_line(data=test2_gg,
-            aes(x=x,y=predicted))+
-  scale_fill_gradient(low = "grey70", high = "red", guide = "none") +
-  theme_bw()+
-  #scale_y_log10()+
-  labs(x="Annual cumulative intensity (°C-days)",
-       y="New records within the analysis period") +
-  #coord_cartesian(ylim=c(0,3))+
-  # Add the labels using annotate() for fixed positions
-  annotate("text", x = 381, y = 16, 
-           label = p_label, 
-           hjust = 1, vjust = 1, size = 4) +
-  annotate("text", x = 381, y = 14, 
-           label = N_label, 
-           hjust = 1, vjust = 1, size = 4)+
-  ggbreak::scale_y_break(breaks=c(2,3),scales = c(2,0.5))+
-  scale_y_continuous(breaks=c(0,1,2,5,10,15,20))
-test2_p
-ggsave(filename ="test2_p.png" ,plot =test2_p ,device = "jpeg",units = "cm",width = 15,height = 10)
-```
-
 ##species_level
-```{r}
-library(glmmTMB)
-
-test_sp=glmmTMB(data = filtered_data_before_first_record,
-              formula = records~annual_c_int+(1|h3_id)+(1|species),
-              family = "binomial")
-summary(test_sp)
-performance::check_singularity(test_sp)
-performance::check_convergence(test_sp)
-sjPlot::plot_model(test_sp,type="eff",terms="annual_c_int",show.data = T)+
-  theme_bw()
-plot(DHARMa::simulateResiduals(test_sp))
-MuMIn::r.squaredGLMM(test_sp)
-AIC(test_sp)
-
-test_sp_gg=ggeffects::ggpredict(test_sp,terms="annual_c_int [0:240 by=1]")
-```
-
-Plot species level
-```{r}
-# 1. Extract the p-value for 'annual_c_int'
-# The p-value is in the fixed effects part of the model summary.
-p_value <- summary(test_sp)$coefficients$cond["annual_c_int", "Pr(>|z|)"]
-
-# 2. Extract the sample size (number of observations)
-N <- nobs(test_sp)
-
-# 3. Create a formatted label string
-# Format the p-value to a specific number of decimal places (e.g., 3)
-p_label <- paste0("p-value ", format.pval(p_value, digits = 5, eps = 0.0001))
-N_label <- paste0("n = ", N)
-
-# 4. Determine the position for the labels
-# These coordinates are illustrative; adjust them to fit your plot data.
-# Assuming x is from 0 to about 120 and y is on a log scale (say max 1000).
-x_pos <- max(filtered_data_before_first_record$annual_c_int, na.rm = TRUE) * 0.95 # Near top-right
-y_pos_p <- max(filtered_data_before_first_record$records, na.rm = TRUE) * 0.95 
-y_pos_N <- max(filtered_data_before_first_record$records, na.rm = TRUE) * 0.7 # Adjust vertical separation on log scale
-
-# Convert y_pos to a single data frame for geom_text/annotate if preferred
-stats_df <- data.frame(
-  x = c(x_pos, x_pos),
-  y = c(y_pos_p, y_pos_N),
-  label = c(p_label, N_label)
-)
-
-test_sp_p=ggplot(filtered_data_before_first_record)+
-  geom_point(aes(x=annual_c_int,y=records),
-             alpha=0.3,
-             color="grey")+
-  geom_ribbon(data=test_sp_gg,
-              aes(x=x,ymin=conf.low,ymax=conf.high),
-              alpha=0.3,
-              fill="#E61316")+
-  geom_line(data=test_sp_gg,
-              aes(x=x,y=predicted),
-            linewidth=1)+
-  labs(x="Annual cumulative intensity (°C-days)",
-       y="Record status",
-       title="A) Fixed baseline")+
-  theme_bw()+
-  annotate("text", x = 55, y = 0.9, 
-           label = p_label, 
-           hjust = 1, vjust = 1, size = 4)# +
-  # annotate("text", x = 40, y = 0.8, 
-  #          label = N_label, 
-  #          hjust = 1, vjust = 1, size = 4)
-test_sp_p
-ggsave(filename ="test_sp_p.png" ,plot =test_sp_p ,device = "jpeg",units = "cm",width = 15,height = 10)
-```
-
-
 #2.1) detrended cumulative intensity
+
 Estimate annual cumulative intensity per hexagon
 ```{r}
 annual_c_int_dt=clim_dt %>% 
@@ -559,18 +366,34 @@ filtered_data_before_first_record_dt <- final_data_clean_dt %>%
   # 5. Remove the helper column and ungroup
   select(-first_record_year) %>%
   ungroup() %>%
-  filter(!is.na(species)) #%>% 
-  # left_join(read_rds(
-  # "copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m//corrected_hex_level_data/final_data/all_hexagons_daily_summary_10m.rds") %>%
-  # mutate(h3_id = str_remove(h3_id, "_cleaned"),
-  #        year_of_mhws=lubridate::year(date)) %>% 
-  # group_by(h3_id,year_of_mhws) %>% 
-  #            summarise(median_sst=median(mean_sst_10m)),by=c("h3_id","year_of_mhws")) %>% 
-  # left_join(ormef_h3_id,by="h3_id") %>% 
-  # mutate(weights=1/sources)
+  filter(!is.na(species)) %>% 
+  group_by(h3_id,species) %>%
+  filter(sum(records)>0) %>% 
+  ungroup()
 
+#Check that there are no species with zero sum across hexagons and years
+filtered_data_before_first_record_dt %>% 
+  group_by(h3_id,species) %>% 
+  summarise(sum=sum(records)) %>% view
 #write_rds(filtered_data_before_first_record_dt,"filtered_data_before_first_record_dt.rds")
+```
 
+#2.3) Add sst
+```{r}
+annual_sst=read_rds(
+  "copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m//corrected_hex_level_data/final_data/all_hexagons_daily_summary_10m.rds") %>%
+  mutate(h3_id = str_remove(h3_id, "_cleaned"),
+         year_of_mhws=lubridate::year(date)) %>% 
+  group_by(h3_id,year_of_mhws) %>% 
+             summarise(median_sst=median(mean_sst_10m))
+
+#add the annual sst
+filtered_data_before_first_record_dt=read_rds("filtered_data_before_first_record_dt.rds")
+filtered_data_before_first_record_dt_sst=filtered_data_before_first_record_dt %>% 
+  left_join(annual_sst,by=c("h3_id","year_of_mhws")) %>% 
+  left_join(ormef_h3_id ,by=c("h3_id")) %>% 
+  mutate(weights=1/sources)
+#write_rds(filtered_data_before_first_record_dt_sst,"filtered_data_before_first_record_dt_sst.rds")
 ```
 
 
@@ -602,11 +425,6 @@ source_temp=ggplot(filtered_data_before_first_record_dt_sst_meff %>%
   theme_bw()+
   labs(x="Year",y="Sources",title="B) Temporal trend")
 source_temp
-ggplot(filtered_data_before_first_record_dt_sst_meff %>% 
-         mutate(points=h3jsr::cell_to_point(h3_id)))+
-  geom_point(aes(x=year_of_records,y=sources))+
-  theme_bw()+
-  labs(x="Year",y="Sources",title="A) Temporal trend")
 
 cor.test(filtered_data_before_first_record_dt_sst_meff$sources,filtered_data_before_first_record_dt_sst_meff$year_of_mhws)
 
@@ -622,6 +440,68 @@ filtered_data_before_first_record_dt_sst_meff %>%
 
 #write the analysis data with sources
 # write_rds(filtered_data_before_first_record_dt_sst_meff,"filtered_data_before_first_record_dt_sst_meff.rds")
+```
+
+Plot proxy to monitoring effort
+```{r}
+# 2. Convert H3 IDs to Spatial Polygons (sf object)
+ormef_sf <- ormef_h3_id %>%
+  filter(h3_id%in%intersect(filtered_data_before_first_record_dt_sst$h3_id %>% unique(),ormef_h3_id_year$h3_id %>% unique)) %>% 
+  # Pass the entire data frame and specify the H3 column name
+  h3jsr::cell_to_polygon(
+    input = .,               # '.' refers to the incoming data frame
+    simple = FALSE           # Recommended for a tidy output
+  ) %>%
+  # The output is now a proper sf object, so st_set_crs works
+  sf::st_set_crs(4326)
+
+# 3. Get Mediterranean Land Boundaries for Context
+# Function from rnaturalearth
+world <-rnaturalearth:: ne_countries(scale = "large", returnclass = "sf")
+
+# 4. Create the ggplot map
+h3_map <- ggplot() +
+    # Plot the H3 Hexagons (your data)
+  geom_sf(
+    data = ormef_sf,
+    # Fills the hexagons based on the 'sources' count
+    aes(fill = sources), 
+    color = "black",     
+    linewidth = 0.1,     
+    alpha = 0.8          
+  ) +
+  # Add land boundaries first 
+  geom_sf(data = world, fill = "antiquewhite", color = "black", linewidth = 0.1) +
+  # Customize the color scale (from ggplot2 / viridis package, which tidyverse uses)
+  scale_fill_viridis_c(
+    name = "Sources",
+    option = "turbo"
+  ) +
+  # Set the map extent to focus on the Mediterranean Sea
+  coord_sf(
+    xlim = c(-6, 38),   
+    ylim = c(26, 48),  
+    expand = FALSE
+  ) +
+  # Apply a clean theme and labels
+  labs(
+    title = "A) Spatial distribution of sources",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_bw() +
+  theme(
+# --- CHANGE IS HERE ---
+ # Moves the legend inside the plot using (x, y) coordinates
+legend.position = c(0.22, 0.17),
+# Optional: Makes the legend background transparent
+legend.background = element_rect(fill = "transparent", color = NA),
+legend.key.size = unit(0.25, "cm"),
+panel.grid.major = element_line(color = "skyblue", linewidth = 0.2),
+    panel.background = element_rect(fill = "skyblue", color = NA) 
+  )
+h3_map
+ggsave(filename ="h3_map.png" ,plot =h3_map ,device = "jpeg",units = "cm",width = 25,height = 12)
 ```
 
 bias grid
@@ -641,10 +521,10 @@ ggsave(filename ="bias_grid.png" ,plot =bias_grid ,device = "jpeg",units = "cm",
 Load the data
 ```{r}
 filtered_data_before_first_record_dt_sst_meff=read_rds("filtered_data_before_first_record_dt_sst_meff.rds") %>%#add the DCI_p index 
-  left_join(read.csv("dci_index.csv") %>% 
-              select(h3_id,
-                     DCI_P),
-            by="h3_id") %>% 
+  # left_join(read.csv("dci_index.csv") %>% 
+  #             select(h3_id,
+  #                    DCI_P),
+  #           by="h3_id") %>% 
   left_join(read.csv("cpi_data_with_C_all.csv") %>% 
               select(h3_id,
                      CPI),
@@ -670,6 +550,8 @@ filtered_data_before_first_record_dt_sst_meff=filtered_data_before_first_record_
                                   species%in%"Ablennes hians"~2018,
                                   species%in%"Cryptocentrus steinhardti"~2012,
                                   species%in%"Sargocentron caudimaculatum"~2021,
+                                  species%in%"Synodus randalli"~2023,
+                                  species%in%"Acanthurus xanthopterus"~,
                                   TRUE~first_rec_year))
 
 species_yfr=filtered_data_before_first_record_dt_sst_meff %>% 

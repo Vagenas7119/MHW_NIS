@@ -4,6 +4,60 @@ author: "Shahar Chaikin"
 date: "2025-09-12"
 output: html_document
 ---
+I am going to intensly clean this data following these rules:
+
+1. Global Data Integrity and Filtering Rules
+These rules apply to the entire row and determine which records are retained.
+
+Duplicate Removal: Any row that is a complete duplicate across all columns is removed, keeping only one unique instance using the distinct() function.
+
+Minimum Data Requirement: Only rows with successfully converted and non-missing values in new_year, new_lat, and new_long are retained.
+
+Symmetrical Coordinates Filter: Rows where the cleaned latitude (new_lat) is numerically identical to the cleaned longitude (new_long) are removed, as this often indicates data entry error (checked using round(.x, 6) for precision).
+
+2. Year (year) Cleaning Rules
+Year cleaning ensures the values are proper four-digit years and flags any changes.
+
+Typo Correction: Specific typos are fixed:
+
+"2029" is corrected to 2020.
+
+"20161" is corrected to 2016.
+
+Incomplete/Range Filtering (Deletion): Any original year that is not a four-digit string (e.g., "20", <2014, 1986-2001) results in the row being deleted.
+
+Change Tracking: The year_changed flag is set to TRUE if any specific typo correction occurred or if the original year was invalid.
+
+3. Coordinate (lat and long) Preprocessing and Formatting
+These steps clean up non-standard separators and characters before conversion.
+
+Decimal Space Fix: Spurious spaces around the decimal point are removed (e.g., "37. 0255" becomes "37.0255").
+
+Trailing Digit Removal: Excessive trailing whitespace and any single separated digit at the end of a coordinate string are removed (e.g., "34.184593     5" becomes "34.184593").
+
+8-Digit Format Correction: Coordinates consisting of exactly eight digits (e.g., "34680278") are converted by inserting a decimal point after the first two digits (e.g., "34.680278").
+
+Split Coordinate Fix: If a comma-separated coordinate pair is found in the lat column (e.g., "42.194238, 18.887795"), the second value is moved to the long column.
+
+Corrupt String Fix (Rule 6): Corrupt DMS strings (e.g., '32 56 5+F940') are cleaned by removing the erroneous non-coordinate text.
+
+4. Coordinate Conversion and Conditional Swapping
+This section handles the complex conversion from DMS to Decimal Degrees (DD) and the conditional swapping of lat and long.
+
+DMS Conversion: Strings identified as Degree-Minute-Second (DMS) format (e.g., using spaces, quotes, or degree symbols) are converted to Decimal Degrees using a custom function.
+
+DMS Typo Logic: If the "seconds" component in a DMS string is greater than 60 (e.g., "34 32 960"), it is interpreted as decimal minutes (e.g., 34∘32.960 ′), correcting a probable transcription error.
+
+Conditional Swapping Rules (Flips): The raw lat and long columns are swapped before final DD conversion if:
+
+General (Mediterranean Bounds Check): The coordinates are in a DMS-like format and leaving them non-flipped results in coordinates outside the Mediterranean Sea bounding box (Lat[28∘,46 ∘], Long[−6 ∘ ,37 ∘]).
+
+Cyprus Exception: The coordinates are in a DMS-like format, the country is "Cyprus", and the non-flipped DD latitude is less than 34 ∘ .
+
+Bad Resolution Filter: Rows where the final DD conversion results in a simple integer (e.g., 31) are removed, unless that value was successfully generated from a high-precision DMS format, which addresses the "bad resolution" issue.
+
+Change Tracking: lat_changed and long_changed flags are set to TRUE if any preprocessing, splitting, swapping, or DMS conversion occurred on that record.
+
 
 libraries
 ```{r}
@@ -11,20 +65,310 @@ library(tidyverse)
 options(scipen = 999)
 ```
 
-Function
+Functions and med border
 ```{r}
-# Function to convert longitude to decimal degrees
-convert_to_decimal_degrees <- function(longitude) {
-  degrees <- floor(longitude / 100)
-  minutes <- longitude %% 100
-  decimal_degrees <- degrees + minutes / 60
-  return(decimal_degrees)
+# --- (dms_to_dd function remains the same as in the previous response) ---
+# Function to convert Degree Minute Second (DMS) to Decimal Degrees (DD)
+dms_to_dd <- function(dms_string) {
+  if (is.na(dms_string)) return(NA_real_)
+
+  # 1. Normalize separators
+  dms_string <- str_replace_all(dms_string, "°", " ")
+  dms_string <- str_remove_all(dms_string, "['\"“”NESW]")
+  dms_string <- str_squish(str_trim(dms_string))
+
+  # 2. Split the string by space
+  parts <- str_split(dms_string, " ", simplify = TRUE) %>% str_trim()
+  parts <- parts[parts != ""]
+
+  # 3. Check for valid components
+  if (length(parts) < 2) return(NA_real_)
+
+  # Convert parts to numeric
+  d <- suppressWarnings(as.numeric(parts[1]))
+  m <- suppressWarnings(as.numeric(parts[2]))
+
+  if (is.na(d) || is.na(m)) return(NA_real_)
+
+  # 4. Calculate Decimal Degrees
+  if (length(parts) == 3) {
+    s <- suppressWarnings(as.numeric(parts[3]))
+    if (is.na(s)) return(NA_real_)
+
+    # CRITICAL FIX for D M S with S > 60: Interpret as 'D Minutes.Fraction'
+    if (s > 60) {
+      decimal_minutes_str <- paste0(parts[2], ".", parts[3])
+      m_decimal <- suppressWarnings(as.numeric(decimal_minutes_str))
+      if (is.na(m_decimal)) return(NA_real_)
+      dd <- d + m_decimal/60
+    } else {
+      # Standard DMS conversion
+      dd <- d + m/60 + s/3600
+    }
+  } else if (length(parts) == 2) {
+    # D M conversion
+    dd <- d + m/60
+  } else {
+    return(NA_real_)
+  }
+
+  return(dd)
 }
+
+# Define Mediterranean Sea Bounding Box for validation
+MED_LAT_MIN <- 30.26
+MED_LAT_MAX <- 45.78
+MED_LONG_MIN <- -6.03
+MED_LONG_MAX <- 36.22
 ```
 
 
-Records data
+New version - all automatically
 ```{r}
+# Load the data and perform initial column selection/renaming
+records<- read.csv(
+  "C:\\Users\\User\\Desktop\\research\\Mentoring and colaborations\\Georgous\\MHW_NIS\\records data/raw/New coordinates 8.10.25.csv",
+  fileEncoding = "latin1"
+) %>%
+  select(species,
+         year,
+         lat=`Latitude.1`,
+         long=`Longitude.1`,
+         country=CounTurkeyy,
+         coll.date,
+         individuals=Abundance..n.specimens.)
+```
+
+```{r}
+# The full data cleaning pipeline (FINAL VERSION)
+records_cleaned <- records %>%
+  # ----------------------------------------------------------------
+  ## PRE-FILTER: Remove Complete Duplicates
+  # ----------------------------------------------------------------
+  distinct() %>%
+
+  # ----------------------------------------------------------------
+  ## PART 1: Clean and Filter 'year' and Track Changes
+  # ----------------------------------------------------------------
+  mutate(
+    # Fix specific typos: 2029 -> 2020 and 20161 -> 2016
+    year_fixed = case_when(
+      year == "2029" ~ "2020",
+      year == "20161" ~ "2016",
+      TRUE ~ year
+    ),
+    is_year_typo_fix = year != year_fixed, # Flag if any specific typo was fixed
+
+    # Check for valid four-digit year (applies to original year, or fixed year)
+    is_valid_year = str_detect(year_fixed, "^\\d{4}$"),
+    new_year = ifelse(is_valid_year, as.numeric(year_fixed), NA_real_),
+
+    # Flag a change if: 1. A specific typo was fixed OR 2. The original year was invalid
+    year_changed = is_year_typo_fix | !is_valid_year
+  ) %>%
+  # Filter out rows where year could not be converted (including '20' and ranges/text)
+  filter(!is.na(new_year)) %>%
+  select(-year_fixed) %>% # Drop temporary column
+
+  # ----------------------------------------------------------------
+  ## PART 2: Clean and Validate 'lat' and 'long'
+  # ----------------------------------------------------------------
+  mutate(
+    new_lat_raw = lat,
+    new_long_raw = long
+  ) %>%
+
+  # NEW RULE 1: Fix spaces within decimal numbers
+  mutate(
+    # e.g., "37. 0255" -> "37.0255", "34.19 489" -> "34.19489"
+    is_decimal_space_fix = str_detect(new_lat_raw, "\\d+\\.\\s+\\d+") | str_detect(new_long_raw, "\\d+\\.\\s+\\d+"),
+    across(c(new_lat_raw, new_long_raw), ~ str_replace_all(.x, "\\.\\s+", ".")) # Replace dot-space with just dot
+  ) %>%
+
+  # Coordinate Preprocessing (Trailing Digit and Excess Space)
+  mutate(
+    is_trailing_digit = str_detect(new_lat_raw, "\\s+\\d$") | str_detect(new_long_raw, "\\s+\\d$"),
+    
+    across(c(new_lat_raw, new_long_raw), ~
+             str_squish(str_trim(.x)) %>%
+             str_replace("\\s+\\d$", "")
+    )
+  ) %>%
+
+  # Tidy up common issues: Rule 7, Rule 3, Rule 6 (Cleaning)
+  mutate(
+    # Rule 7: Flag and fix "34680278" format
+    is_format_7 = str_detect(new_lat_raw, "^\\d{8}$") | str_detect(new_long_raw, "^\\d{8}$"),
+    across(c(new_lat_raw, new_long_raw), ~
+             ifelse(str_detect(.x, "^\\d{8}$"),
+                    paste0(str_sub(.x, 1, 2), ".", str_sub(.x, 3)),
+                    .x)
+    ),
+
+    # Rule 3: Flag and fix two coordinates in 'lat'
+    coords_in_lat = str_split(new_lat_raw, ", *", simplify = TRUE),
+    has_split = coords_in_lat[, 1] != "" & coords_in_lat[, 2] != "" & !str_detect(new_lat_raw, "[ NESW'\"”°]"),
+    new_lat_raw = ifelse(has_split, coords_in_lat[, 1], new_lat_raw),
+    new_long_raw = ifelse(has_split, coords_in_lat[, 2], new_long_raw),
+
+    # Rule 6: Flag and fix '32 56 5+F940' -> '32 56 5'
+    is_format_6 = str_detect(new_lat_raw, "\\+F940"),
+    new_lat_raw = str_replace(new_lat_raw, "\\s*\\+F940", "")
+  ) %>%
+  select(-coords_in_lat) %>%
+
+  # Step A: Identify which cases need DMS conversion (DMS cases are candidates for flipping)
+  mutate(
+    is_dms_candidate = str_detect(new_lat_raw, "[ '\"NESW°]") | 
+                       (str_detect(new_lat_raw, "^\\s*\\d+\\s+\\d+\\s*(\\d+)?\\s*$") & !str_detect(new_lat_raw, "\\."))
+  ) %>%
+
+  # Step B: Convert DMS candidates without flipping (The default conversion)
+  mutate(
+    # Convert both coordinates assuming NO flip has occurred yet
+    no_flip_lat = ifelse(is_dms_candidate, map_dbl(new_lat_raw, dms_to_dd), as.numeric(new_lat_raw)),
+    no_flip_long = ifelse(is_dms_candidate, map_dbl(new_long_raw, dms_to_dd), as.numeric(new_long_raw))
+  ) %>%
+  
+  # Step C: Determine if a flip is necessary based on new rules
+  mutate(
+    # Rule 5/6 Trigger: The DMS case requires flipping IF:
+    # 1. The original "flipped" rule was triggered (implied by DMS candidate) AND
+    # 2. The NON-flipped result is OUTSIDE the Mediterranean bounds.
+    is_outside_med = no_flip_lat < MED_LAT_MIN | no_flip_lat > MED_LAT_MAX | 
+                     no_flip_long < MED_LONG_MIN | no_flip_long > MED_LONG_MAX,
+                     
+    # Rule: Check if the original DMS rule was triggered.
+    is_original_dms_flip = (str_detect(new_lat_raw, "^\\s*\\d+\\s+\\d+\\s*(\\d+)?\\s*$") & !str_detect(new_lat_raw, "\\.")),
+    
+    # Rule: Cyprus exception: DMS case AND country is Cyprus AND resulting lat is < 34
+    is_cyprus_flip = is_dms_candidate & (country == "Cyprus") & (no_flip_lat < 34),
+    
+    # Final decision on whether to flip:
+    # Flip if: (Original rule was triggered AND outside Med) OR Cyprus rule is triggered
+    needs_to_flip = (is_original_dms_flip & is_outside_med) | is_cyprus_flip
+  ) %>%
+
+  # Step D: Apply the determined flip
+  mutate(
+    final_lat_raw = ifelse(needs_to_flip, new_long_raw, new_lat_raw),
+    final_long_raw = ifelse(needs_to_flip, new_lat_raw, new_long_raw),
+    
+    # Re-calculate the final converted coordinates
+    new_lat = ifelse(is_dms_candidate, map_dbl(final_lat_raw, dms_to_dd), as.numeric(final_lat_raw)),
+    new_long = ifelse(is_dms_candidate, map_dbl(final_long_raw, dms_to_dd), as.numeric(final_long_raw))
+  ) %>%
+
+  # --- Create FINAL Change Flags ---
+  mutate(
+    # lat/long are changed if any cleaning or flip rule was triggered
+    lat_changed = is_original_dms_flip | has_split | is_format_7 | is_format_6 | is_trailing_digit | is_decimal_space_fix | needs_to_flip,
+    long_changed = is_original_dms_flip | has_split | is_format_7 | is_trailing_digit | is_decimal_space_fix | needs_to_flip
+  ) %>%
+
+  # ----------------------------------------------------------------
+  ## PART 3: Final Filtering and Selection
+  # ----------------------------------------------------------------
+  
+  # Rule: if lat = long remove this line (after final conversion to numeric)
+  filter(round(new_lat, 6) != round(new_long, 6)) %>%
+  
+  # Remove rows with NA (empty) or bad resolution (simple integer '31')
+  filter(
+    !is.na(new_lat) & !is.na(new_long) &
+    (new_lat != floor(new_lat) | is_dms_candidate) &
+    (new_long != floor(new_long) | is_dms_candidate)
+  ) %>%
+
+  # Select final columns and remove all intermediate raw/flag columns
+  select(species,
+         year,
+         lat,
+         long,
+         coll.date,
+         individuals,
+         country,
+         new_year,
+         new_lat,
+         new_long,
+         year_changed,
+         lat_changed,
+         long_changed)
+```
+
+define columns
+```{r}
+records_cleaned_lite=records_cleaned %>% 
+  select(species,
+         year=new_year,
+         lat=new_lat,
+         long=new_long,
+         coll.date,
+         individuals,
+         country) %>% 
+   filter(!lat<30.26,#only the Med. borders
+         !lat>45.78,
+         !long>36.22,
+         !long<(-6.03))
+
+records_cleaned_lite$year=as.numeric(records_cleaned_lite$year)
+records_cleaned_lite$lat=as.numeric(records_cleaned_lite$lat)
+records_cleaned_lite$long=as.numeric(records_cleaned_lite$long)
+```
+
+
+Plot
+```{r}
+# 1. Get world map data
+world_map <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+
+# 2. Convert your 'records' data frame to an sf object
+records_sf <- records_cleaned_lite %>%
+  sf::st_as_sf(coords = c("long", "lat"), crs = 4326) # CRS 4326 is WGS84 for lat/long
+
+# 3. Calculate the extent of your coordinates
+bbox <- sf::st_bbox(records_sf)
+
+# 4. Create the ggplot
+raw_rec_map=ggplot() +
+  # Add the world map
+  geom_sf(data = world_map, fill = "antiquewhite", color = "black", linewidth = 0.1) +
+  # Add your data points
+  geom_sf(data = records_sf, size = 1, alpha = 0.7) +
+  # Crop the map to the extent of your points
+  coord_sf(
+    xlim = c(bbox["xmin"] - 1, bbox["xmax"] + 1), # Adjust buffer as needed
+    ylim = c(bbox["ymin"] - 1, bbox["ymax"] + 1), # Adjust buffer as needed
+    expand = FALSE # Prevents adding extra space around the crop
+  ) +
+  # Add labels and theme
+  labs(
+    title = "Species records (unthinned)",
+    x = "Longitude",
+    y = "Latitude",
+    color = "Species" # Legend title for species color
+  ) +
+  guides(color=F)+
+  theme_bw() +
+  theme(
+# --- CHANGE IS HERE ---
+ # Moves the legend inside the plot using (x, y) coordinates
+legend.position = c(0.22, 0.17),
+# Optional: Makes the legend background transparent
+legend.background = element_rect(fill = "transparent", color = NA),
+legend.key.size = unit(0.25, "cm"),
+panel.grid.major = element_line(color = "skyblue", linewidth = 0.2),
+    panel.background = element_rect(fill = "skyblue", color = NA) 
+  )
+
+ggsave(filename ="raw_rec_map.png" ,plot =raw_rec_map ,device = "jpeg",units = "cm",width = 25,height = 12)
+
+```
+
+
+
+Records data
+```{r eval=FALSE, include=FALSE}
 #new
 #manual fixes:
 #Stephanolepis diaspros - Lesvos - lat fix
@@ -54,6 +398,8 @@ records_lite=read.csv("C:\\Users\\User\\Desktop\\research\\Mentoring and colabor
          country=CounTurkeyy,
          coll.date,
          individuals=Abundance..n.specimens.) %>%
+  
+  #Handle MEDITS data
    mutate(#find spaces format lon lat
     is_dms_space_format = str_detect(lat, "^\\s*\\d+\\s+\\d+\\s+\\d+") |
                           str_detect(long, "^\\s*\\d+\\s+\\d+\\s+\\d+"),
@@ -93,6 +439,8 @@ records_lite=read.csv("C:\\Users\\User\\Desktop\\research\\Mentoring and colabor
       # Default Case: If the string is not the DMS format, keep the original value
       TRUE ~ long
     )) %>% 
+  
+  
   #removing leading and trailing whitespace 
   mutate(year =if_else(trimws(year) == "" | str_detect(year, "[<>]") | str_detect(year, "\\?\\?\\?"),
                          NA_character_, year),
@@ -111,14 +459,7 @@ records_lite=read.csv("C:\\Users\\User\\Desktop\\research\\Mentoring and colabor
                         year==20161~2016,
                         TRUE~year)) %>% 
   filter(year>1987) %>% 
-  drop_na() %>% 
-  #fix medits format
-  mutate(lat=if_else(lat>46,
-                     convert_to_decimal_degrees(lat),
-                     lat),
-         long=if_else(long>39,
-                     convert_to_decimal_degrees(long),
-                     long)) %>% #fix wrong inserted years
+  drop_na() %>% #fix wrong inserted years
   filter(!lat<30.26,#only the Med. borders
          !lat>45.78,
          !long>36.22,
@@ -132,7 +473,7 @@ Harmonize species names
 ```{r}
 records_lite_harm_bdc= 
   bdc::bdc_query_names_taxadb(
-  unique(records_lite$species),
+  unique(records_cleaned_lite$species),
   suggest_names = T)
 
 Harmonization_fix=records_lite_harm_bdc %>% 
@@ -155,12 +496,12 @@ Harmonization_fix=records_lite_harm_bdc %>%
   filter(!scientificName%in%"remove_me") %>% 
   select(species=original_search,
          corrected=scientificName) %>% 
-  mutate(is_cahnged=species==corrected)
+  mutate(is_cahnged=species!=corrected)
 ```
 
 Join harmonized
 ```{r}
-records_lite_harm=records_lite %>% 
+records_lite_harm=records_cleaned_lite %>% 
   left_join(Harmonization_fix %>% select(species,corrected),
             by="species") %>% 
   drop_na() %>% 
@@ -169,14 +510,14 @@ records_lite_harm=records_lite %>%
   select(species,year,lat,long,country,coll.date,individuals) %>% 
   mutate(h3_id = h3::geo_to_h3(c(lat,long), res = 3))
 
-write.csv(records_lite_harm,"records_cleaned_harm_8_10_25.csv",row.names = F)
+#write.csv(records_lite_harm,"records_cleaned_harm_8_10_25.csv",row.names = F)
 ```
 
 
 
 Extrat the h3 IDs of which climatic data is needed
 ```{r}
-coords=records_lite %>% 
+coords=records_cleaned_lite %>% 
   distinct(species,lat,long) %>% 
   mutate(h3_id = h3::geo_to_h3(c(lat,long), res = 3)) %>% 
   distinct(h3_id)
