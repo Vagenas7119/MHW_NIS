@@ -19,12 +19,13 @@ library(stars) # To handle spatiotemporal raster data
 
 Hexagons to be used for downloading climatic data
 ```{r}
-hex=read.csv("coords_for_clim_extr.csv")
+  hex=read.csv("records data/cleaned/records_cleaned_harm_8_10_25.csv") %>% 
+  select(h3_id) %>% 
+  distinct()
 hex_medits=read.csv("h3_medits2.csv") %>% 
   select(h3_id=2)
-setdiff(c(1,2,3,4,6),c(1,2,3,4,5))
 
-setdiff(hex_medits$h3_id,hex$h3_id)
+setdiff(hex_medits,hex)
 
 hex_records_medits=bind_rows(hex,hex_medits) %>% distinct()
 ```

@@ -43,6 +43,8 @@ Records data
    # Jaydia smithi - 2010
 #Fix format in Platycephalus indicus - Lebanon 2011
 #Fix  format in Pomacanthus imperator Egypt 2019
+#fix cases like this: 32 56 540
+
 #old
 records_lite=read.csv("C:\\Users\\User\\Desktop\\research\\Mentoring and colaborations\\Georgous\\MHW_NIS\\records data/raw/New coordinates 8.10.25.csv", fileEncoding = "latin1") %>% 
   select(species,
@@ -52,12 +54,55 @@ records_lite=read.csv("C:\\Users\\User\\Desktop\\research\\Mentoring and colabor
          country=CounTurkeyy,
          coll.date,
          individuals=Abundance..n.specimens.) %>%
+   mutate(#find spaces format lon lat
+    is_dms_space_format = str_detect(lat, "^\\s*\\d+\\s+\\d+\\s+\\d+") |
+                          str_detect(long, "^\\s*\\d+\\s+\\d+\\s+\\d+"),
+    lat = case_when(
+      # Condition: If the specific latitude string matches the DMS pattern
+      str_detect(lat, "^\\s*\\d+\\s+\\d+\\s+\\d+") ~ {
+        # Conversion Logic (wrapped in {} to run multiple statements)
+        matches = str_match(lat, "^\\s*(\\d+)\\s+(\\d+)\\s+(\\d+)\\s*$")
+        D = as.numeric(matches[, 2])
+        M = as.numeric(matches[, 3])
+        S_raw = as.numeric(matches[, 4])
+
+        # Assumption: If S is 100 or greater, treat as thousandths of a second (S/1000)
+        S = if_else(S_raw >= 100 & S_raw <= 1000, S_raw / 1000, S_raw)
+
+        # DD conversion: D + M/60 + S/3600
+        as.character(D + (M / 60) + (S / 3600))
+      },
+      # Default Case: If the string is not the DMS format, keep the original value
+      TRUE ~ lat
+    ),
+
+    # --- Longitude Fix ---
+    long = case_when(
+      # Condition: If the specific longitude string matches the DMS pattern
+      str_detect(long, "^\\s*\\d+\\s+\\d+\\s+\\d+") ~ {
+        # Conversion Logic (same as latitude)
+        matches = str_match(long, "^\\s*(\\d+)\\s+(\\d+)\\s+(\\d+)\\s*$")
+        D = as.numeric(matches[, 2])
+        M = as.numeric(matches[, 3])
+        S_raw = as.numeric(matches[, 4])
+
+        S = if_else(S_raw >= 100 & S_raw <= 1000, S_raw / 1000, S_raw)
+
+        as.character(D + (M / 60) + (S / 3600))
+      },
+      # Default Case: If the string is not the DMS format, keep the original value
+      TRUE ~ long
+    )) %>% 
   #removing leading and trailing whitespace 
-  #three question marks (???) 
   mutate(year =if_else(trimws(year) == "" | str_detect(year, "[<>]") | str_detect(year, "\\?\\?\\?"),
                          NA_character_, year),
-         lat = if_else(trimws(lat) == ""| str_detect(lat, "[<>]") | str_detect(lat, "\\?\\?\\?"), NA_character_, lat),
-         long = if_else(trimws(long) == ""| str_detect(long, "[<>]") | str_detect(long, "\\?\\?\\?"), NA_character_, long)) %>% 
+         lat = if_else(trimws(lat) == ""| str_detect(lat, "[<>]") | str_detect(lat, "\\?\\?\\?"),
+                       NA_character_,
+                       lat),
+         long = if_else(trimws(long) == ""| str_detect(long, "[<>]") | str_detect(long, "\\?\\?\\?"),
+                        NA_character_,
+                        long)) %>% 
+    #three question marks (???) 
   filter(!year%in%"date??") %>% 
   mutate(year=as.numeric(year),
          lat=as.numeric(lat),
