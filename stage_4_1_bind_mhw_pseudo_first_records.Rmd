@@ -20,31 +20,6 @@ library(tidyverse)
 #detrended
 clim_dt=read_rds("climatology_dt_df.rds")
 events_dt=read_rds("event_dt_df.rds")
-
-#Proxy for monitoring effort
-ormef <- read.delim("C:\\Users\\User\\Desktop\\research\\data\\ORMEF\\89476.tsv") %>% 
-  mutate(
-    # 1. str_replace() changes all commas (",") in the string to a period (".")
-    Decimal_Lat = str_replace(Decimal_Lat, ",", "."),
-    Decimal_Long = str_replace(Decimal_Long, ",", ".")) %>%
-  # 2. Use a second mutate() call to convert the new string format to a numeric type
-  mutate(
-    Decimal_Lat = as.numeric(Decimal_Lat),
-    Decimal_Long = as.numeric(Decimal_Long),
-    h3_id = h3jsr::point_to_cell(
-    input = sf::st_as_sf(.,
-                         coords = c("Decimal_Long", "Decimal_Lat"),
-                         crs = 4326),
-    res = 3))# %>%  #keep all sources even if non Lessepsian related
- # filter(Category %in%"EXOTIC CAN")
-
-ormef_h3_id=ormef %>% 
-  group_by(h3_id) %>% 
-  summarise(sources=n_distinct(Reference))
-
-ormef_h3_id_year=ormef %>% 
-  group_by(h3_id,Year) %>% 
-  summarise(sources=n_distinct(Reference))
 ```
 
 #1.1) annual cumulative intensity
@@ -82,6 +57,7 @@ records_min=records %>%
   slice(1) %>%
 #Ungroup the data (good practice after grouping operations)
   ungroup()
+
 #Sum annual and spatial records
 records_min_count=records_min %>% 
   group_by(h3_id,year) %>% 
@@ -109,7 +85,7 @@ Plot coords
 # Ensure 'lat' and 'long' columns exist in 'records'
 
 # 1. Get world map data
-world_map <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+world_map <- rnaturalearth::ne_countries(scale = "large", returnclass = "sf")
 
 # 2. Convert your 'records' data frame to an sf object
 records_sf <- records_min %>%
@@ -120,9 +96,9 @@ records_sf <- records_min %>%
 bbox <- sf::st_bbox(records_sf)
 
 # 4. Create the ggplot
-ggplot() +
+rec_thinned_map=ggplot() +
   # Add the world map
-  geom_sf(data = world_map, fill = "lightgrey", color = "darkgrey") +
+  geom_sf(data = world_map, fill = "antiquewhite", color = "black", linewidth = 0.1) +
   # Add your data points
   geom_sf(data = records_sf, size = 1, alpha = 0.7) +
   # Crop the map to the extent of your points
@@ -133,13 +109,24 @@ ggplot() +
   ) +
   # Add labels and theme
   labs(
-    title = "Species records",
+    title = "Species records (thinned)",
     x = "Longitude",
     y = "Latitude",
-    color = "Species" # Legend title for species color
-  ) +
-  theme_minimal()+
-  guides(color=F)
+    color = "Species") +
+  guides(color=F)+
+  theme_bw() +
+  theme(
+# --- CHANGE IS HERE ---
+ # Moves the legend inside the plot using (x, y) coordinates
+legend.position = c(0.22, 0.17),
+# Optional: Makes the legend background transparent
+legend.background = element_rect(fill = "transparent", color = NA),
+legend.key.size = unit(0.25, "cm"),
+panel.grid.major = element_line(color = "skyblue", linewidth = 0.2),
+    panel.background = element_rect(fill = "skyblue", color = NA) 
+  )
+
+# ggsave(filename ="rec_thinned_map.png" ,plot =rec_thinned_map ,device = "jpeg",units = "cm",width = 25,height = 12)
 ```
 
 #1.3) Bind MHWs and records
@@ -387,6 +374,16 @@ annual_sst=read_rds(
   group_by(h3_id,year_of_mhws) %>% 
              summarise(median_sst=median(mean_sst_10m))
 
+sptaial_sst=read_rds(
+  "copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m//corrected_hex_level_data/final_data/all_hexagons_daily_summary_10m.rds") %>%
+  mutate(h3_id = str_remove(h3_id, "_cleaned"),
+         year_of_mhws=lubridate::year(date)) %>% 
+  group_by(h3_id) %>% 
+             summarise(median_s_sst=median(mean_sst_10m),
+                       max_s_sst=max(mean_sst_10m),
+                       min_s_sst=min(mean_sst_10m),
+                       mean_s_sst=mean(mean_sst_10m))
+
 #add the annual sst
 filtered_data_before_first_record_dt=read_rds("filtered_data_before_first_record_dt.rds")
 filtered_data_before_first_record_dt_sst=filtered_data_before_first_record_dt %>% 
@@ -396,11 +393,176 @@ filtered_data_before_first_record_dt_sst=filtered_data_before_first_record_dt %>
 #write_rds(filtered_data_before_first_record_dt_sst,"filtered_data_before_first_record_dt_sst.rds")
 ```
 
+#Plot spatial SST
+```{r}
+# 2. Convert H3 IDs to Spatial Polygons (sf object)
+sptaial_sst_sf <- sptaial_sst  %>% 
+  # Pass the entire data frame and specify the H3 column name
+  h3jsr::cell_to_polygon(
+    input = .,               # '.' refers to the incoming data frame
+    simple = FALSE           # Recommended for a tidy output
+  ) %>%
+  # The output is now a proper sf object, so st_set_crs works
+  sf::st_set_crs(4326)
+
+# 3. Get Mediterranean Land Boundaries for Context
+# Function from rnaturalearth
+world <-rnaturalearth:: ne_countries(scale = "large", returnclass = "sf")
+
+# 4. Create the ggplot map
+sst_map <- ggplot() +
+    # Plot the H3 Hexagons (your data)
+  geom_sf(
+    data = sptaial_sst_sf,
+    # Fills the hexagons based on the 'sources' count
+    aes(fill = median_s_sst), 
+    color = "black",     
+    linewidth = 0.1,     
+    alpha = 0.8          
+  ) +
+  # Add land boundaries first 
+  geom_sf(data = world, fill = "antiquewhite", color = "black", linewidth = 0.1) +
+  # Customize the color scale (from ggplot2 / viridis package, which tidyverse uses)
+  scale_fill_viridis_c(
+    name = "SST (°C)",
+    option = "turbo"
+  ) +
+  # Set the map extent to focus on the Mediterranean Sea
+  coord_sf(
+    xlim = c(-6, 38),   
+    ylim = c(26, 48),  
+    expand = FALSE
+  ) +
+  # Apply a clean theme and labels
+  labs(
+    title = "A) Spatial SST",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_bw() +
+  theme(
+# --- CHANGE IS HERE ---
+ # Moves the legend inside the plot using (x, y) coordinates
+legend.position = c(0.15, 0.17),
+# Optional: Makes the legend background transparent
+legend.background = element_rect(fill = "transparent", color = NA),
+legend.key.size = unit(0.25, "cm"),
+panel.grid.major = element_line(color = "#DBDBDC", linewidth = 0.2),
+    panel.background = element_rect(fill = "#DBDBDC", color = NA) 
+  )
+sst_map
+ggsave(filename ="sst_map.png" ,plot =sst_map ,device = "jpeg",units = "cm",width = 25,height = 12)
+```
+
+#Spatial c_intensity
+```{r}
+spatial_c_int_dt=annual_c_int_dt  %>% 
+  group_by(h3_id) %>% 
+  select(h3_id,year_of_mhws,annual_c_int) %>% 
+  summarise(max_c_int=max(annual_c_int))
+
+# 2. Convert H3 IDs to Spatial Polygons (sf object)
+spatial_c_int_dt_sf <- spatial_c_int_dt %>% 
+  # Pass the entire data frame and specify the H3 column name
+  h3jsr::cell_to_polygon(
+    input = .,               # '.' refers to the incoming data frame
+    simple = FALSE           # Recommended for a tidy output
+  ) %>%
+  # The output is now a proper sf object, so st_set_crs works
+  sf::st_set_crs(4326)
+
+# 3. Get Mediterranean Land Boundaries for Context
+# Function from rnaturalearth
+world <-rnaturalearth:: ne_countries(scale = "large", returnclass = "sf")
+
+# 4. Create the ggplot map
+max_c_int_map <- ggplot() +
+    # Plot the H3 Hexagons (your data)
+  geom_sf(
+    data = spatial_c_int_dt_sf,
+    # Fills the hexagons based on the 'sources' count
+    aes(fill = max_c_int), 
+    color = "black",     
+    linewidth = 0.1,     
+    alpha = 0.8          
+  ) +
+  # Add land boundaries first 
+  geom_sf(data = world, fill = "antiquewhite", color = "black", linewidth = 0.1) +
+  # Customize the color scale (from ggplot2 / viridis package, which tidyverse uses)
+  scale_fill_viridis_c(
+    name = "Max. cumulative intensity (°C-days)",
+    option = "turbo"
+  ) +
+  # Set the map extent to focus on the Mediterranean Sea
+  coord_sf(
+    xlim = c(-6, 38),   
+    ylim = c(26, 48),  
+    expand = FALSE
+  ) +
+  # Apply a clean theme and labels
+  labs(
+    title = "B) Spatial cumulative intensity",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_bw() +
+  theme(
+# --- CHANGE IS HERE ---
+ # Moves the legend inside the plot using (x, y) coordinates
+legend.position = c(0.3, 0.17),
+# Optional: Makes the legend background transparent
+legend.background = element_rect(fill = "transparent", color = NA),
+legend.key.size = unit(0.25, "cm"),
+panel.grid.major = element_line(color = "#DBDBDC", linewidth = 0.2),
+    panel.background = element_rect(fill = "#DBDBDC", color = NA) 
+  )
+max_c_int_map
+ggsave(filename ="max_c_int_map.png" ,plot =max_c_int_map ,device = "jpeg",units = "cm",width = 25,height = 12)
+```
+
+Bind maps
+```{r}
+spatial_temp_panel=gridExtra::grid.arrange(
+  sst_map,
+  max_c_int_map,
+  layout_matrix = rbind(c(1),
+                        c(2)))
+ggsave(filename ="spatial_temp_panel.png" ,plot =spatial_temp_panel ,device = "jpeg",units = "cm",width = 20,height = 20)
+```
 
 #2.4) GLMMs
 ###monitoring effort control
 Account for monitoring effort by years and h3_id
 This specifically accounts for the increased monitoring effort over time
+```{r}
+#Proxy for monitoring effort
+ormef <- read.delim("C:\\Users\\User\\Desktop\\research\\data\\ORMEF\\89476.tsv") %>% 
+  mutate(
+    # 1. str_replace() changes all commas (",") in the string to a period (".")
+    Decimal_Lat = str_replace(Decimal_Lat, ",", "."),
+    Decimal_Long = str_replace(Decimal_Long, ",", ".")) %>%
+  # 2. Use a second mutate() call to convert the new string format to a numeric type
+  mutate(
+    Decimal_Lat = as.numeric(Decimal_Lat),
+    Decimal_Long = as.numeric(Decimal_Long),
+    h3_id = h3jsr::point_to_cell(
+    input = sf::st_as_sf(.,
+                         coords = c("Decimal_Long", "Decimal_Lat"),
+                         crs = 4326),
+    res = 3))# %>%  #keep all sources even if non Lessepsian related
+ # filter(Category %in%"EXOTIC CAN")
+
+ormef_h3_id=ormef %>% 
+  group_by(h3_id) %>% 
+  summarise(sources=n_distinct(Reference))
+
+ormef_h3_id_year=ormef %>% 
+  group_by(h3_id,Year) %>% 
+  summarise(sources=n_distinct(Reference))
+
+ggplot(data=ormef_h3_id_year)+
+  geom_point(aes(x=Year,y=sources))
+```
 
 Use only hexagons that are within both datasets.
 ```{r}
@@ -417,11 +579,48 @@ filtered_data_before_first_record_dt_sst_meff=
   mutate(sources=case_when(is.na(sources)~0,
                            TRUE~sources))
 
+#####################################
+#Consider  using the ORMEF data to predict sources across out study range
+test_sources=glmmTMB(data=filtered_data_before_first_record_dt_sst_meff %>% 
+                  filter(year_of_records%in%c(1988:2020)),
+                formula = sources~year_of_records,
+                family = "nbinom1")
+summary(test_sources)
+plot(DHARMa::simulateResiduals(test_sources))
+performance::check_singularity(test_sources)
+performance::check_convergence(test_sources)
+MuMIn::r.squaredGLMM(test_sources)
+sjPlot::plot_model(test_sources,type="eff",terms="year_of_records",show.data = T,jitter = 0.1)
+test_sources_gg=ggeffects::ggpredict(test_sources,terms="year_of_records[1988:2020 by=1]") %>% 
+  as_tibble() %>% 
+  select(year_of_records=x,
+         sources_pred=predicted,
+         conf.low,
+         conf.high)
+
+#add predicted
+filtered_data_before_first_record_dt_sst_meff=filtered_data_before_first_record_dt_sst_meff %>% 
+  left_join(test_sources_gg %>% 
+              select(year_of_records,
+                     sources_pred),
+            by="year_of_records")
+
+#plot
 source_temp=ggplot(filtered_data_before_first_record_dt_sst_meff %>% 
                      ungroup() %>% 
                      distinct(h3_id,year_of_records,sources))+
-  geom_jitter(aes(x=year_of_records,y=sources),height = 0.1)+
-  #geom_violin(aes(x=year_of_records,y=sources,group=year_of_records))+
+  geom_jitter(data=filtered_data_before_first_record_dt_sst_meff %>% 
+                filter(year_of_records%in%c(1988:2020)),
+              aes(x=year_of_records,y=sources),height = 0.1)+
+  geom_ribbon(data=test_sources_gg,
+              aes(x=year_of_records,
+                  ymin=conf.low,
+                  ymax=conf.high),
+              alpha=0.5)+
+  geom_line(data=test_sources_gg,
+              aes(x=year_of_records,
+                  y=sources_pred),linewidth=1,
+            color="purple")+
   theme_bw()+
   labs(x="Year",y="Sources",title="B) Temporal trend")
 source_temp
@@ -497,8 +696,8 @@ legend.position = c(0.22, 0.17),
 # Optional: Makes the legend background transparent
 legend.background = element_rect(fill = "transparent", color = NA),
 legend.key.size = unit(0.25, "cm"),
-panel.grid.major = element_line(color = "skyblue", linewidth = 0.2),
-    panel.background = element_rect(fill = "skyblue", color = NA) 
+panel.grid.major = element_line(color = "#DBDBDC", linewidth = 0.2),
+    panel.background = element_rect(fill = "#DBDBDC", color = NA) 
   )
 h3_map
 ggsave(filename ="h3_map.png" ,plot =h3_map ,device = "jpeg",units = "cm",width = 25,height = 12)
@@ -525,46 +724,73 @@ filtered_data_before_first_record_dt_sst_meff=read_rds("filtered_data_before_fir
   #             select(h3_id,
   #                    DCI_P),
   #           by="h3_id") %>% 
-  left_join(read.csv("cpi_data_with_C_all.csv") %>% 
-              select(h3_id,
-                     CPI),
-            by = join_by(h3_id))
+  # left_join(read.csv("cpi_data_with_C_all.csv") %>% 
+  #             select(h3_id,
+  #                    CPI),
+  #           by = join_by(h3_id)) %>% 
+  left_join(sptaial_sst,by="h3_id")
 
-year_of_f_rec=ormef %>% 
-  group_by(Species) %>% 
-  summarise(first_rec_year=min(Year)) %>% 
-  rename(species=Species) %>% 
-  mutate(species=case_when(species%in%"Torquigener flavimaculosus"~"Torquigener hypselogeneion",
-            species%in%"Chelon carinatus"~"Planiliza carinata",
-            species%in%"Oxyurichthys petersi"~"Oxyurichthys petersii",
-            species%in%"Chelon carinatus"~"Cryptocentrus caeruleopunctatus",
-            species%in%"Hippocampus fuscus"~"Hippocampus kuda",
-            TRUE~species))
+year_of_f_rec=read.csv("records data/cleaned/records_cleaned_harm_8_10_25.csv") %>% 
+  group_by(species) %>% 
+  summarise(first_rec_year=min(year))
+  # ormef %>% 
+  # group_by(Species) %>% 
+  # summarise(first_rec_year=min(Year)) %>% 
+  # rename(species=Species) %>% 
+  # mutate(species=case_when(species%in%"Torquigener flavimaculosus"~"Torquigener hypselogeneion",
+  #           species%in%"Chelon carinatus"~"Planiliza carinata",
+  #           species%in%"Oxyurichthys petersi"~"Oxyurichthys petersii",
+  #           species%in%"Chelon carinatus"~"Cryptocentrus caeruleopunctatus",
+  #           species%in%"Hippocampus fuscus"~"Hippocampus kuda",
+  #           TRUE~species))
 
 filtered_data_before_first_record_dt_sst_meff=filtered_data_before_first_record_dt_sst_meff %>% 
   left_join(year_of_f_rec,
-            by="species") %>% 
-  mutate(first_rec_year=case_when(species%in%"Cryptocentrus caeruleopunctatus"~2014,
-                                  species%in%"Himantura leoparda"~2016,#consider 2008 - paper
-                                  species%in%"Sardinella gibbosa"~2008,
-                                  species%in%"Ablennes hians"~2018,
-                                  species%in%"Cryptocentrus steinhardti"~2012,
-                                  species%in%"Sargocentron caudimaculatum"~2021,
-                                  species%in%"Synodus randalli"~2023,
-                                  species%in%"Acanthurus xanthopterus"~,
-                                  TRUE~first_rec_year))
+            by="species") 
+# %>% 
+#   mutate(first_rec_year=case_when(species%in%"Cryptocentrus caeruleopunctatus"~2014,
+#                                   species%in%"Himantura leoparda"~2016,#consider 2008 - paper
+#                                   species%in%"Sardinella gibbosa"~2008,
+#                                   species%in%"Ablennes hians"~2018,
+#                                   species%in%"Cryptocentrus steinhardti"~2012,
+#                                   species%in%"Sargocentron caudimaculatum"~2021,
+#                                   species%in%"Synodus randalli"~2023,
+#                                   species%in%"Acanthurus xanthopterus"~,
+#                                   TRUE~first_rec_year))
 
-species_yfr=filtered_data_before_first_record_dt_sst_meff %>% 
-  select(species,first_rec_year) %>% 
-  distinct(species,first_rec_year)
+# species_yfr=filtered_data_before_first_record_dt_sst_meff %>% 
+#   select(species,first_rec_year) %>% 
+#   distinct(species,first_rec_year)
 
 #write.csv(species_yfr,"species_yfr.csv",row.names = F)
 ```
 
-I am going to add current-weighted distance to the source variable.
+Model
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~Pay attention that sources data is limited to 2022~ so I should trim my data too~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ```{r}
+filtered_data_before_first_record_dt_sst_meff_2020=filtered_data_before_first_record_dt_sst_meff %>% 
+    filter(year_of_records<=2020)
+
+check_zeros=filtered_data_before_first_record_dt_sst_meff_2020 %>% 
+  group_by(h3_id,species) %>% 
+  summarise(n=(sum(records))) %>% 
+  filter(n>0)
+
+model_data_2020_clean=filtered_data_before_first_record_dt_sst_meff_2020 %>% 
+  inner_join(check_zeros %>% select(-n),
+             by=c("h3_id","species"))
+
+check_zeros2=model_data_2020_clean %>% 
+  group_by(h3_id,species) %>% 
+  summarise(n=(sum(records)))
+###################################################
+#If I filter 2020 I need to remmove complete zero time series#
+###################################################
+library(glmmTMB)
 test_sp_dt_time_sst_mon_eff=glmmTMB(
-  data = filtered_data_before_first_record_dt_sst_meff,
+  data = model_data_2020_clean,
   formula = records~
     scale(first_rec_year)+
     scale(CPI)+
@@ -572,26 +798,38 @@ test_sp_dt_time_sst_mon_eff=glmmTMB(
     scale(annual_c_int)+
     scale(year_of_mhws)+
     scale(median_sst)+
+    scale(max_s_sst)+
     (1|h3_id)+
     (1|species),
-  family = "betabinomial",
+  family = "binomial",
   control = glmmTMBControl(optimizer = optim,
                            optArgs = list(method = "BFGS",
                                           maxit = 10000)))
-#write_rds(test_sp_dt_time_sst_mon_eff,"test_sp_dt_time_sst_mon_eff_cpi.rds")
-test_sp_dt_time_sst_mon_eff=read_rds("glmms\\test_sp_dt_time_sst_mon_eff_cpi/test_sp_dt_time_sst_mon_eff_cpi.rds")
+#Colinearity
+##median_s_sst
+ #            Term  VIF   VIF 95% CI Increased SE Tolerance Tolerance 95% CI
+ #   scale(median_sst) 5.90 [5.77, 6.04]         2.43      0.17     [0.17, 0.17]
+ # scale(median_s_sst) 6.03 [5.90, 6.18]         2.46      0.17     [0.16, 0.17]
+
+##max_s_sst - no colinearity!
+
+##min_s_sst - no colinearity!
+
+##mean_s_sst
+# Moderate Correlation
+#               Term  VIF   VIF 95% CI Increased SE Tolerance Tolerance 95% CI
+#  scale(median_sst) 5.36 [5.24, 5.48]         2.32      0.19     [0.18, 0.19]
+#  scale(mean_s_sst) 5.44 [5.32, 5.57]         2.33      0.18     [0.18, 0.19]
+
+#write_rds(test_sp_dt_time_sst_mon_eff,"test_sp_dt_time_sst_mon_eff_binomial_s_sst.rds")
+# test_sp_dt_time_sst_mon_eff=read_rds("glmms\\test_sp_dt_time_sst_mon_eff_cpi/test_sp_dt_time_sst_mon_eff_cpi.rds")
 summary(test_sp_dt_time_sst_mon_eff)
 plot(DHARMa::simulateResiduals(test_sp_dt_time_sst_mon_eff))
 performance::check_singularity(test_sp_dt_time_sst_mon_eff)
 performance::check_convergence(test_sp_dt_time_sst_mon_eff)
+performance::check_overdispersion(test_sp_dt_time_sst_mon_eff)
 performance::check_collinearity(test_sp_dt_time_sst_mon_eff)
 MuMIn::r.squaredGLMM(test_sp_dt_time_sst_mon_eff)
-
-AIC(test_sp_dt_time_sst_mon_eff)
-
-#AIC with DPIp - 7689.4
-#AIC with CPI - 7689.608
-
 #Summarise table for the model
 fixed_effects_df <- broom.mixed::tidy(test_sp_dt_time_sst_mon_eff, effects = "fixed") %>%
   # Select and rename columns to match the request
@@ -612,11 +850,109 @@ fixed_effects_df <- broom.mixed::tidy(test_sp_dt_time_sst_mon_eff, effects = "fi
 #random effects
 random_effects_df <- broom.mixed::tidy(test_sp_dt_time_sst_mon_eff, effects = "ran_pars") 
 
-#write.csv(fixed_effects_df,"fixed_effects_df.csv",row.names = F)
+#write.csv(fixed_effects_df,"fixed_effects_df_binomial.csv",row.names = F)
 
 #Binomial model: AIC = 7687.6
 #Betabinomial model: AIC = 7689.6
 #Delta is 2 - models are quite similar - I am chossing base on r^2
+```
+R2 partition
+```{r}
+####################
+#Variance partition#
+#####################
+#Run Hierarchical Variance Partitioning using glmm.hp
+## The glmm.hp function calculates the Marginal R2 (R2m) and then decomposes
+## it into the individual contribution of each fixed effect predictor using
+## hierarchical partitioning (average shared variance method).
+library(glmm.hp)
+#semantics
+data_to_use <- model_data_2020_clean %>%
+  mutate(
+    first_rec_year_sc = scale(first_rec_year)[, 1],
+    CPI_sc = scale(CPI)[, 1],
+    sources_sc = scale(sources)[, 1],
+    annual_c_int_sc = scale(annual_c_int)[, 1],
+    year_of_mhws_sc = scale(year_of_mhws)[, 1],
+    median_sst_sc = scale(median_sst)[, 1],
+    max_s_sst_sc=scale(max_s_sst)[,1])
+
+#model
+test_sp_dt_time_sst_mon_eff_sem=glmmTMB(
+  data = data_to_use,
+  formula = records~
+    first_rec_year_sc+
+    CPI_sc+
+    sources_sc+
+    annual_c_int_sc+
+    year_of_mhws_sc+
+    median_sst_sc+
+    max_s_sst_sc+
+    (1|h3_id)+
+    (1|species),
+  family = "binomial")#,
+  #control = glmmTMBControl(optimizer = optim,
+  #                         optArgs = list(method = "BFGS",
+  #                                        maxit = 10000)))
+                                          
+summary(test_sp_dt_time_sst_mon_eff_sem)
+performance::check_singularity(test_sp_dt_time_sst_mon_eff_sem)
+performance::check_convergence(test_sp_dt_time_sst_mon_eff_sem)
+performance::check_collinearity(test_sp_dt_time_sst_mon_eff_sem)
+MuMIn::r.squaredGLMM(test_sp_dt_time_sst_mon_eff_sem)
+DHARMa::simulateResiduals(test_sp_dt_time_sst_mon_eff_sem) %>% plot
+performance::check_overdispersion(test_sp_dt_time_sst_mon_eff_sem)
+#pred list
+# iv=list(pred1="first_rec_year_sc",
+#         pred2="CPI_sc",
+#         pred3="sources_sc",
+#         pred4="annual_c_int_sc",
+#         pred5="year_of_mhws_sc",
+#         pred6="median_sst_sc")
+
+R2_partition_results <-glmm.hp(test_sp_dt_time_sst_mon_eff_sem,
+                                #iv =iv,
+                                type="R2") # Specify that I want adjusted R2 partitioning
+
+R2_partition_results
+write_rds(R2_partition_results,"R2_partition_results_binomial_spatial_sst.rds")
+
+#Interpretation
+##Unique - The R2 explained by the predictor alone, i.e., in a model containing only that predictor.
+
+##Average.share - The R2 explained by the predictor jointly with other predictors, calculated as the average improvement in R2 across all possible models where that predictor is added. This is the primary metric for individual predictor importance.
+
+##Individual - The total contribution of the predictor to the model Rm. This is the sum of its Unique contribution and its Average.share contribution: Unique+Average.share.
+
+##I.perc(%)	- The percentage contribution of the predictor to the total Rm. Calculated as:
+#Individual/Rm2 ×100%.
+
+R2_partition_results_df=R2_partition_results[[2]] %>% 
+  as_data_frame() %>% 
+  rownames_to_column() %>% 
+  rename(predictors=1,
+         Unique =2,
+         Average.share=3,
+         Individual=4,
+         `I.perc(%)`=5) %>% 
+  mutate(predictors=case_when(predictors%in%"1"~"Year of first record",
+                              predictors%in%"2"~"CPI",
+                              predictors%in%"3"~"Sources",
+                              predictors%in%"4"~"Cumulative intensity",
+                              predictors%in%"5"~"Year",
+                              predictors%in%"6"~"SST")) %>% 
+  # 👇 ADD THIS PART TO SUM DOWN THE COLUMNS AND ADD A NEW ROW
+  bind_rows(
+    summarise(., 
+      predictors = "", # Set the predictor name to an empty string (" ")
+      across(
+        .cols = c(Unique, Average.share, Individual, `I.perc(%)`), # Specify the columns to sum
+        .fns = ~sum(., na.rm = TRUE) # Apply the sum function
+      )
+    )
+  )
+  
+write.csv(R2_partition_results_df,"R2_partition_results_df_binomial_spatial_sst.csv",row.names = F)
 ```
 
 Extract predictions
@@ -627,15 +963,23 @@ test_sp_dt_time_sst_mon_eff_gg_cint=ggeffects::ggpredict(
 
 test_sp_dt_time_sst_mon_eff_gg_yr=ggeffects::ggpredict(
   test_sp_dt_time_sst_mon_eff,
-  terms=c("year_of_mhws [1987:2022 by =1]"))
+  terms=c("year_of_mhws [1987:2020 by =1]"))
 
 test_sp_dt_time_sst_mon_eff_gg_sst=ggeffects::ggpredict(
   test_sp_dt_time_sst_mon_eff,
   terms=c("median_sst [14:24 by = 0.5]"))
 
+test_sp_dt_time_sst_mon_eff_gg_s_sst=ggeffects::ggpredict(
+  test_sp_dt_time_sst_mon_eff,
+  terms=c("max_s_sst [23.7:31.1 by = 0.5]"))
+
 test_sp_dt_time_sst_mon_eff_gg_source=ggeffects::ggpredict(
   test_sp_dt_time_sst_mon_eff,
-  terms=c("sources [0:6 by = 1]"))
+  terms=c("sources [0:6 by = 0.1]"))
+
+# test_sp_dt_time_sst_mon_eff_gg_source=ggeffects::ggpredict(
+#   test_sp_dt_time_sst_mon_eff,
+#   terms=c("sources_pred [0.1:2 by = 0.01]"))
 
 test_sp_dt_time_sst_mon_eff_gg_cpi=ggeffects::ggpredict(
   test_sp_dt_time_sst_mon_eff,
@@ -643,7 +987,7 @@ test_sp_dt_time_sst_mon_eff_gg_cpi=ggeffects::ggpredict(
 
 test_sp_dt_time_sst_mon_eff_gg_yfr=ggeffects::ggpredict(
   test_sp_dt_time_sst_mon_eff,
-  terms=c("first_rec_year [1924:2021 by = 1]"))
+  terms=c("first_rec_year [1924:2020 by = 1]"))
 
 write_rds(test_sp_dt_time_sst_mon_eff_gg_cint,
           "test_sp_dt_time_sst_mon_eff_gg_cint.rds")
@@ -657,12 +1001,14 @@ write_rds(test_sp_dt_time_sst_mon_eff_gg_cpi,
           "test_sp_dt_time_sst_mon_eff_gg_cpi.rds")
 write_rds(test_sp_dt_time_sst_mon_eff_gg_yfr,
           "test_sp_dt_time_sst_mon_eff_gg_yfr.rds")
+write_rds(test_sp_dt_time_sst_mon_eff_gg_s_sst,
+          "test_sp_dt_time_sst_mon_eff_gg_s_sst.rds")
 ```
 
 ####Plot model
 ```{r}
 #c_intensity
-test_sp_dt_time_sst_mon_eff_cint_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+test_sp_dt_time_sst_mon_eff_cint_p=ggplot(filtered_data_before_first_record_dt_sst_meff_2020)+
   geom_point(aes(x=annual_c_int,y=records),
              alpha=0.3,
              color="grey")+
@@ -681,7 +1027,7 @@ test_sp_dt_time_sst_mon_eff_cint_p=ggplot(filtered_data_before_first_record_dt_s
 
 
 #c_intensity zoom
-test_sp_dt_time_sst_mon_eff_cint_p_zoom=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+test_sp_dt_time_sst_mon_eff_cint_p_zoom=ggplot(filtered_data_before_first_record_dt_sst_meff_2020)+
   geom_ribbon(data=test_sp_dt_time_sst_mon_eff_gg_cint,
               aes(x=x,ymin=conf.low,ymax=conf.high),
               alpha=0.3,
@@ -705,7 +1051,7 @@ embeded_cint <- test_sp_dt_time_sst_mon_eff_cint_p +
 
 
 #years
-test_sp_dt_time_sst_mon_eff_yr_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+test_sp_dt_time_sst_mon_eff_yr_p=ggplot(filtered_data_before_first_record_dt_sst_meff_2020)+
   geom_point(aes(x=year_of_mhws,y=records),
              alpha=0.3,
              color="grey")+
@@ -724,7 +1070,7 @@ test_sp_dt_time_sst_mon_eff_yr_p=ggplot(filtered_data_before_first_record_dt_sst
 
 
 #SST
-test_sp_dt_time_sst_mon_eff_sst_p=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+test_sp_dt_time_sst_mon_eff_sst_p=ggplot(filtered_data_before_first_record_dt_sst_meff_2020)+
   geom_point(aes(x=median_sst,y=records),
              alpha=0.3,
              color="grey")+
@@ -742,7 +1088,7 @@ test_sp_dt_time_sst_mon_eff_sst_p=ggplot(filtered_data_before_first_record_dt_ss
   theme(axis.title.y = element_blank())
 
 #SST zoom
-test_sp_dt_time_sst_mon_eff_sst_p_zoom=ggplot(filtered_data_before_first_record_dt_sst_meff)+
+test_sp_dt_time_sst_mon_eff_sst_p_zoom=ggplot(filtered_data_before_first_record_dt_sst_meff_2020)+
   geom_ribbon(data=test_sp_dt_time_sst_mon_eff_gg_sst,
               aes(x=x,ymin=conf.low,ymax=conf.high),
               alpha=0.3,
@@ -753,8 +1099,8 @@ test_sp_dt_time_sst_mon_eff_sst_p_zoom=ggplot(filtered_data_before_first_record_
   labs(x="SST (°C)",
        y="Record status")+
   theme_bw()+
-  coord_cartesian(ylim=c(0,.1))+
-  scale_y_continuous(breaks = seq(0,0.1,by=0.05))+
+  coord_cartesian(ylim=c(0,.05))+
+  scale_y_continuous(breaks = seq(0,0.05,by=0.025))+
   theme(axis.title = element_blank(),
         plot.background = element_rect(fill = "transparent", colour = NA))
 
@@ -896,9 +1242,6 @@ used_records_sf <- filtered_data_before_first_record_dt_sst_meff %>%
 # 3. Get Mediterranean Land Boundaries for Context
 # Function from rnaturalearth
 world <-rnaturalearth:: ne_countries(scale = "large", returnclass = "sf")
-ocean <-rnaturalearth:: ne_download(scale = "large",
-                                    type = "ocean",
-                                    category = "physical")
 
 # 4. Create the ggplot map
 records_map <- ggplot() +
@@ -1030,8 +1373,8 @@ model_selection_table <-MuMIn::dredge(
   rank = "AICc" # Use AIC corrected for small sample sizes
 )
 
-write_rds(model_selection_table,"model_selection_table.rds")
-write.csv(model_selection_table %>% as_tibble(),"model_selection_table.csv",row.names = F)
+write_rds(model_selection_table,"model_selection_table_cut_2020.rds")
+write.csv(model_selection_table %>% as_tibble(),"model_selection_table_cut_2020.csv",row.names = F)
 
 # ==============================================================================
 # STEP 3: MANUAL FILTERING AND AIC WEIGHT CALCULATION
@@ -1089,6 +1432,30 @@ print(importance_ranking)
 # Reset global options
 options(na.action = "na.omit")
 ```
+
+###dredge binomial <2020
+```{r}
+options(na.action = "na.fail")
+
+# It also generates the null model (intercept only) and the global model (all fixed effects).
+cat("\nPerforming Model Dredging (comparing all 64 models)...\n")
+model_selection_table_binomial <-MuMIn::dredge(
+  test_sp_dt_time_sst_mon_eff,
+  rank = "AICc" # Use AIC corrected for small sample sizes
+)
+
+write_rds(model_selection_table_binomial,"model_selection_table_binomial_s_sst.rds")
+write.csv(model_selection_table_binomial %>% as_tibble(),"model_selection_table_cut_2020_binomial_s_sst.csv",row.names = F)
+
+options(na.action = "na.omit")
+
+# Calculate variable importance (Sum of weights for each predictor)
+# We must use the original sw() function on the VALID models
+importance_ranking <- MuMIn::sw(model_selection_table_binomial)
+importance_ranking %>% 
+  as_tibble()
+```
+
 
 ###test with DCIp
 ```{r}
