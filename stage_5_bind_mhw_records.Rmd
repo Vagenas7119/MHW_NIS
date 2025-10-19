@@ -165,6 +165,7 @@ filtered_data_before_first_record_dt %>%
 
 ##4.1) Add sst (temporal and spatial)
 ```{r}
+#Estimate the annual median temperature within hexagons
 annual_sst=read_rds(
   "copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m//corrected_hex_level_data/final_data/all_hexagons_daily_summary_10m.rds") %>%
   mutate(h3_id = str_remove(h3_id, "_cleaned"),
@@ -172,19 +173,53 @@ annual_sst=read_rds(
   group_by(h3_id,year_of_mhws) %>% 
              summarise(median_sst=median(mean_sst_10m))
 
+#Estimate the linear slopes of warming trends
+annual_sst_lm_slopes=read_rds(
+  "copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m//corrected_hex_level_data/final_data/all_hexagons_daily_summary_10m.rds") %>%
+  mutate(h3_id = str_remove(h3_id, "_cleaned"),
+         year_of_mhws=lubridate::year(date)) %>% 
+  group_by(h3_id) %>%
+  # 2. Nest the remaining data
+  tidyr::nest() %>%
+  # 3. Apply the linear model (lm) to the nested data
+  mutate(model = purrr::map(data, ~lm(mean_sst_10m ~ year_of_mhws, data = .))) %>%
+  # 4. Tidy the model output to extract key statistics
+  mutate(tidied = purrr::map(model, broom::tidy)) %>%
+  # 5. Unnest the tidied results
+  tidyr::unnest(tidied) %>%
+  # 6. Filter for the slope term
+  filter(term == "year_of_mhws") %>%
+  # 7. Select and rename columns
+  select(h3_id,
+         slope = estimate,
+         se = std.error,
+         p_value = p.value)
+
+#Estimate spatial stats across years to differentiate warming trends from the natural longitudinal thermal gradient in the Med.
 sptaial_sst=read_rds(
   "copernicus_data_by_hexagon/MEDSEA_MULTIYEAR_PHY_006_004_10m//corrected_hex_level_data/final_data/all_hexagons_daily_summary_10m.rds") %>%
   mutate(h3_id = str_remove(h3_id, "_cleaned"),
          year_of_mhws=lubridate::year(date)) %>% 
+  group_by(h3_id,year_of_mhws) %>% 
+  #Annual stats.
+  summarise(
+    annual_min=min(mean_sst_10m),
+    annual_mean=mean(mean_sst_10m),
+    annual_median=median(mean_sst_10m),
+    annual_max=max(mean_sst_10m)) %>% 
   group_by(h3_id) %>% 
-             summarise(median_s_sst=median(mean_sst_10m),
-                       max_s_sst=max(mean_sst_10m),
-                       min_s_sst=min(mean_sst_10m),
-                       mean_s_sst=mean(mean_sst_10m))
+  #Long term stats.
+             summarise(long_median_s_sst=median(annual_median),
+                       long_max_s_sst=median(annual_max),
+                       long_min_s_sst=median(annual_min),
+                       long_mean_s_sst=median(annual_mean))
 
 #add the annual sst
 filtered_data_before_first_record_dt_sst=filtered_data_before_first_record_dt %>% 
   left_join(annual_sst,by=c("h3_id","year_of_mhws")) %>% 
+  left_join(annual_sst_lm_slopes %>% 
+              select(h3_id,sst_slope=slope),
+            by="h3_id") %>% 
   left_join(sptaial_sst,by=c("h3_id"))
 ```
 
@@ -325,8 +360,8 @@ filtered_data_before_first_record_dt_sst_meff_yfr_cpi_cleaned %>%
 
 Save the data to be used for GLMMs
 ```{r}
-write_rds(filtered_data_before_first_record_dt_sst_meff_yfr_cpi_cleaned,
-          "record_data_for_glmms.rds")
+# write_rds(filtered_data_before_first_record_dt_sst_meff_yfr_cpi_cleaned,
+#           "record_data_for_glmms.rds")
 ```
 
 #6) Plots
@@ -549,7 +584,68 @@ intro_grid=gridExtra::grid.arrange(
 ggsave(filename ="intro_grid.png" ,plot =intro_grid ,device = "jpeg",units = "cm",width = 20,height = 20)
 ```
 
-##6.6) spatial SST
+##6.6.1) SST slopes
+```{r}
+# 2. Convert H3 IDs to Spatial Polygons (sf object)
+sptaial_sst_slope_sf <- annual_sst_lm_slopes  %>% 
+  # Pass the entire data frame and specify the H3 column name
+  h3jsr::cell_to_polygon(
+    input = .,               # '.' refers to the incoming data frame
+    simple = FALSE           # Recommended for a tidy output
+  ) %>%
+  # The output is now a proper sf object, so st_set_crs works
+  sf::st_set_crs(4326)
+
+# 3. Get Mediterranean Land Boundaries for Context
+# Function from rnaturalearth
+world <-rnaturalearth:: ne_countries(scale = "large", returnclass = "sf")
+
+# 4. Create the ggplot map
+sst_slope_map <- ggplot() +
+    # Plot the H3 Hexagons (your data)
+  geom_sf(
+    data = sptaial_sst_slope_sf,
+    # Fills the hexagons based on the 'sources' count
+    aes(fill = slope), 
+    color = "black",     
+    linewidth = 0.1,     
+    alpha = 0.8          
+  ) +
+  # Add land boundaries first 
+  geom_sf(data = world, fill = "antiquewhite", color = "black", linewidth = 0.1) +
+  # Customize the color scale (from ggplot2 / viridis package, which tidyverse uses)
+  scale_fill_viridis_c(
+    name = "SST slope (°C/ year)",
+    option = "turbo"
+  ) +
+  # Set the map extent to focus on the Mediterranean Sea
+  coord_sf(
+    xlim = c(-6, 38),   
+    ylim = c(26, 48),  
+    expand = FALSE
+  ) +
+  # Apply a clean theme and labels
+  labs(
+    title = "A) SST warming rates",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_bw() +
+  theme(axis.title = element_blank(),
+# --- CHANGE IS HERE ---
+ # Moves the legend inside the plot using (x, y) coordinates
+legend.position = c(0.18, 0.17),
+# Optional: Makes the legend background transparent
+legend.background = element_rect(fill = "transparent", color = NA),
+legend.key.size = unit(0.25, "cm"),
+panel.grid.major = element_line(color = "#DBDBDC", linewidth = 0.2),
+    panel.background = element_rect(fill = "#DBDBDC", color = NA) 
+  )
+sst_slope_map
+```
+
+
+##6.6.2) spatial SST
 ```{r}
 # 2. Convert H3 IDs to Spatial Polygons (sf object)
 sptaial_sst_sf <- sptaial_sst  %>% 
@@ -571,7 +667,7 @@ sst_map <- ggplot() +
   geom_sf(
     data = sptaial_sst_sf,
     # Fills the hexagons based on the 'sources' count
-    aes(fill = median_s_sst), 
+    aes(fill = long_median_s_sst), 
     color = "black",     
     linewidth = 0.1,     
     alpha = 0.8          
@@ -580,7 +676,7 @@ sst_map <- ggplot() +
   geom_sf(data = world, fill = "antiquewhite", color = "black", linewidth = 0.1) +
   # Customize the color scale (from ggplot2 / viridis package, which tidyverse uses)
   scale_fill_viridis_c(
-    name = "SST (°C)",
+    name = "Median SST (°C)",
     option = "turbo"
   ) +
   # Set the map extent to focus on the Mediterranean Sea
@@ -591,12 +687,12 @@ sst_map <- ggplot() +
   ) +
   # Apply a clean theme and labels
   labs(
-    title = "A) Spatial SST",
+    title = "B) Spatial SST",
     x = "Longitude",
     y = "Latitude"
   ) +
   theme_bw() +
-  theme(
+  theme(axis.title = element_blank(),
 # --- CHANGE IS HERE ---
  # Moves the legend inside the plot using (x, y) coordinates
 legend.position = c(0.15, 0.17),
@@ -609,7 +705,7 @@ panel.grid.major = element_line(color = "#DBDBDC", linewidth = 0.2),
 sst_map
 ```
 
-##6.7) Spatial c_intensity
+##6.6.3) Spatial c_intensity
 ```{r}
 spatial_c_int_dt=annual_c_int_dt  %>% 
   group_by(h3_id) %>% 
@@ -656,12 +752,12 @@ max_c_int_map <- ggplot() +
   ) +
   # Apply a clean theme and labels
   labs(
-    title = "B) Spatial cumulative intensity",
+    title = "C) Spatial cumulative intensity",
     x = "Longitude",
     y = "Latitude"
   ) +
   theme_bw() +
-  theme(
+  theme(axis.title = element_blank(),
 # --- CHANGE IS HERE ---
  # Moves the legend inside the plot using (x, y) coordinates
 legend.position = c(0.3, 0.17),
@@ -676,12 +772,15 @@ max_c_int_map
 
 Bind maps
 ```{r}
-spatial_temp_panel=gridExtra::grid.arrange(
+spatial_temp_panel=gridExtra::grid.arrange(bottom="Longitude",
+                                           left="Latitude",
+  sst_slope_map,
   sst_map,
   max_c_int_map,
   layout_matrix = rbind(c(1),
-                        c(2)))
-ggsave(filename ="spatial_temp_panel.png" ,plot =spatial_temp_panel ,device = "jpeg",units = "cm",width = 20,height = 20)
+                        c(2),
+                        c(3)))
+ggsave(filename ="spatial_temp_panel.png" ,plot =spatial_temp_panel ,device = "jpeg",units = "cm",width = 13,height = 26)
 ```
 
 ##6.8) monitoring effort control
