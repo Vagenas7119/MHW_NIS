@@ -198,13 +198,15 @@ embeded_cint <- test_main_cint_p +
 
 #years
 test_main_yr_p=ggplot(data_models)+
-  geom_point(aes(x=year_of_mhws,y=records),
+  geom_jitter(aes(x=year_of_mhws,y=records),
              alpha=0.3,
-             color="grey")+
+             color="grey",
+             width = 0.1,
+             height = 0.01)+
   geom_ribbon(data=test_main_gg_yr,
               aes(x=x,ymin=conf.low,ymax=conf.high),
               alpha=0.3,
-              fill="#E61316")+
+              fill="#56B52F")+
   geom_line(data=test_main_gg_yr,
               aes(x=x,y=predicted),
             linewidth=1)+
@@ -227,7 +229,7 @@ test_main_sst_p=ggplot(data_models)+
   geom_line(data=test_main_gg_sst,
               aes(x=x,y=predicted),
             linewidth=1)+
-  labs(x="SST (°C)",
+  labs(x="SST-temporal (°C)",
        y="Record status",
        title="B) SST")+
   theme_bw()+
@@ -242,7 +244,7 @@ test_main_sst_p_zoom=ggplot(data_models)+
   geom_line(data=test_main_gg_sst,
               aes(x=x,y=predicted),
             linewidth=1)+
-  labs(x="SST (°C)",
+  labs(x="SST-temporal (°C)",
        y="Record status")+
   theme_bw()+
   coord_cartesian(ylim=c(0,.05))+
@@ -260,10 +262,10 @@ embeded_sst <- test_main_sst_p +
 ```
 
 ```{r}
-test_main_grid=gridExtra::grid.arrange(left="Probability of record occurrence",
+test_main_grid=gridExtra::grid.arrange(left="Occurrence probability",
   test_main_yr_p,
                         embeded_sst+
-    labs(title="B) Temporal SST trends"),
+    labs(title="B) SST-temporal"),
                         test_main_cint_p,
                         ncol = 2,
                         nrow=2,
@@ -877,6 +879,60 @@ R2_partition_results_pre_est_sc_df=R2_partition_results_pre_est_sc[[2]] %>%
 write.csv(R2_partition_results_pre_est_sc_df,"R2_partition_results_pre_est_sc_df.csv",row.names = F)
 ```
 
+###4.2.2) extract predicted
+```{r}
+# List the predictors you want to marginalize over (from your model formula)
+predictors <- c(
+  "annual_c_int",
+  "year_of_mhws",
+  "median_sst",
+  "long_max_s_sst",
+  "sources",
+  "CPI",
+  "first_rec_year")
+
+# Define the step size (by) for each predictor's range.
+step_sizes <- list(
+  annual_c_int = 1,
+  year_of_mhws = 1,
+  median_sst   = 0.5,
+  long_max_s_sst = 0.5,
+  sources      = 0.1,
+  CPI          = 0.001,
+  first_rec_year = 1)
+
+# --- 2. Create the Data Frame of Prediction Terms ---
+
+# Dynamically calculate the min/max range for each predictor from the original pre_est_test
+prediction_terms_df <- pre_est_data %>%
+  select(all_of(predictors)) %>%
+  # Summarize the min and max for each column
+  summarise(across(everything(), list(min = min, max = max))) %>%
+  # Pivot to long format using names_pattern to capture the full predictor name
+  pivot_longer(
+    cols = everything(),
+    names_to = c("predictor", ".value"),
+    # The regex (.*) captures EVERYTHING up to the LAST underscore, and (min|max) captures the suffix.
+    names_pattern = "(.*)_(min|max)"
+  ) %>%
+  # Add the 'by' step size. 'predictor' now contains the full name (e.g., 'annual_c_int'),
+  # which correctly matches the names in the step_sizes list.
+  mutate(by = unlist(step_sizes[predictor])) %>%
+  # Construct the full 'terms' string for ggpredict()
+  mutate(ggpredict_term = paste0(predictor, " [", min, ":", max, " by = ", by, "]"))
+
+# --- 3. Automate Predictions and Combine Data Frames ---
+
+all_predictions_combined_pre <- prediction_terms_df %>%
+  pull(ggpredict_term) %>%
+  map_dfr(~ {
+    pred_data <-ggeffects::ggpredict(pre_est_test, terms = .x) %>% as.data.frame()
+    predictor_name <- str_extract(.x, "^[^ ]+") # Extract the predictor name from the term string
+    return(pred_data %>% mutate(predictor_used = predictor_name)) # Renamed to 'predictor_used' for clarity
+  })
+#write.csv(all_predictions_combined_pre,"all_predictions_combined_pre.csv",row.names = F)
+```
+
 ##4.3) Post-establishment
 ```{r}
 post_est_test=glmmTMB(
@@ -1004,9 +1060,249 @@ R2_partition_results_post_est_sc_df=R2_partition_results_post_est_sc[[2]] %>%
 write.csv(R2_partition_results_post_est_sc_df,"R2_partition_results_post_est_sc_df.csv",row.names = F)
 ```
 
-
-#5) Plot all models
+###4.3.2) extract predicted
 ```{r}
+# List the predictors you want to marginalize over (from your model formula)
+predictors <- c(
+  "annual_c_int",
+  "year_of_mhws",
+  "median_sst",
+  "long_max_s_sst",
+  "sources",
+  "CPI",
+  "first_rec_year")
 
+# Define the step size (by) for each predictor's range.
+step_sizes <- list(
+  annual_c_int = 1,
+  year_of_mhws = 1,
+  median_sst   = 0.5,
+  long_max_s_sst = 0.5,
+  sources      = 0.1,
+  CPI          = 0.001,
+  first_rec_year = 1)
+
+# --- 2. Create the Data Frame of Prediction Terms ---
+
+# Dynamically calculate the min/max range for each predictor from the original pre_est_test
+prediction_terms_df_post <- post_est_data %>%
+  select(all_of(predictors)) %>%
+  # Summarize the min and max for each column
+  summarise(across(everything(), list(min = min, max = max))) %>%
+  # Pivot to long format using names_pattern to capture the full predictor name
+  pivot_longer(
+    cols = everything(),
+    names_to = c("predictor", ".value"),
+    # The regex (.*) captures EVERYTHING up to the LAST underscore, and (min|max) captures the suffix.
+    names_pattern = "(.*)_(min|max)"
+  ) %>%
+  # Add the 'by' step size. 'predictor' now contains the full name (e.g., 'annual_c_int'),
+  # which correctly matches the names in the step_sizes list.
+  mutate(by = unlist(step_sizes[predictor])) %>%
+  # Construct the full 'terms' string for ggpredict()
+  mutate(ggpredict_term = paste0(predictor, " [", min, ":", max, " by = ", by, "]"))
+
+# --- 3. Automate Predictions and Combine Data Frames ---
+
+all_predictions_combined_post <- prediction_terms_df_post %>%
+  pull(ggpredict_term) %>%
+  map_dfr(~ {
+    pred_data <-ggeffects::ggpredict(post_est_test, terms = .x) %>% as.data.frame()
+    predictor_name <- str_extract(.x, "^[^ ]+") # Extract the predictor name from the term string
+    return(pred_data %>% mutate(predictor_used = predictor_name)) # Renamed to 'predictor_used' for clarity
+  })
+
+#write.csv(all_predictions_combined_post,"all_predictions_combined_post.csv",row.names = F)
+```
+
+##4.4) Plot phases
+###4.4.1) Year
+####pre
+```{r}
+pre_yr_p=ggplot(pre_est_data)+
+  geom_jitter(aes(x=year_of_mhws,y=records),
+             alpha=0.3,
+             color="grey",
+             width = 0.1,
+             height = 0.01)+
+  geom_ribbon(data=all_predictions_combined_pre %>% 
+                filter(predictor_used%in%"year_of_mhws"),
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#56B52F")+
+  geom_line(data=all_predictions_combined_pre %>% 
+                filter(predictor_used%in%"year_of_mhws"),
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="Year",
+       y="Record status",
+       title="A) ")+
+  theme_bw()+
+  theme(axis.title = element_blank())
+pre_yr_p
+```
+
+####post
+```{r}
+post_yr_p=ggplot(post_est_data)+
+  geom_jitter(aes(x=year_of_mhws,y=records),
+             alpha=0.3,
+             color="grey",
+             width = 0.1,
+             height = 0.01)+
+  geom_ribbon(data=all_predictions_combined_post %>% 
+                filter(predictor_used%in%"year_of_mhws"),
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#56B52F")+
+  geom_line(data=all_predictions_combined_post %>% 
+                filter(predictor_used%in%"year_of_mhws"),
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="Year",
+       y="Record status",
+       title="B) ")+
+  theme_bw()+
+  theme(axis.title = element_blank())
+post_yr_p
+```
+
+###4.4.1) SST-spatiotemporal
+####pre
+```{r}
+pre_sst_p=ggplot(pre_est_data)+
+  geom_point(aes(x=median_sst,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=all_predictions_combined_pre %>% 
+                filter(predictor_used%in%"median_sst"),
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=all_predictions_combined_pre %>% 
+                filter(predictor_used%in%"median_sst"),
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="SST - spatiotemporal (°C)",
+       y="Record status",
+       title="C) ")+
+  theme_bw()+
+  theme(axis.title = element_blank())
+pre_sst_p
+
+#SST zoom
+pre_sst_p_zoom=ggplot(pre_est_data)+
+  geom_ribbon(data=all_predictions_combined_pre %>% 
+                filter(predictor_used%in%"median_sst"),
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=all_predictions_combined_pre %>% 
+                filter(predictor_used%in%"median_sst"),
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  theme_bw()+
+  coord_cartesian(ylim=c(0,.08))+
+  #scale_y_continuous(breaks = seq(0,0.05,by=0.025))+
+  theme(axis.title = element_blank(),
+        plot.background = element_rect(fill = "transparent", colour = NA))
+
+#embed sst
+embeded_sst_pre <- pre_sst_p +
+  annotation_custom(ggplotGrob(pre_sst_p_zoom),
+                    xmin = 16, xmax = 23,
+                    ymin = 0.1, ymax = 0.9)+
+  theme(axis.title = element_blank())
+embeded_sst_pre
+```
+
+####post
+```{r}
+post_sst_p=ggplot(post_est_data)+
+  geom_point(aes(x=median_sst,y=records),
+             alpha=0.3,
+             color="grey")+
+  geom_ribbon(data=all_predictions_combined_post %>% 
+                filter(predictor_used%in%"median_sst"),
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=all_predictions_combined_post %>% 
+                filter(predictor_used%in%"median_sst"),
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  labs(x="SST - spatiotemporal (°C)",
+       y="Record status",
+       title="D) ")+
+  theme_bw()+
+  theme(axis.title.y = element_blank())
+post_sst_p
+
+#SST zoom
+post_sst_p_zoom=ggplot(post_est_data)+
+  geom_ribbon(data=all_predictions_combined_post %>% 
+                filter(predictor_used%in%"median_sst"),
+              aes(x=x,ymin=conf.low,ymax=conf.high),
+              alpha=0.3,
+              fill="#E61316")+
+  geom_line(data=all_predictions_combined_post %>% 
+                filter(predictor_used%in%"median_sst"),
+              aes(x=x,y=predicted),
+            linewidth=1)+
+  theme_bw()+
+  coord_cartesian(ylim=c(0,.004))+
+  #scale_y_continuous(breaks = seq(0,0.05,by=0.025))+
+  theme(axis.title = element_blank(),
+        plot.background = element_rect(fill = "transparent", colour = NA))
+
+#embed sst
+embeded_sst_pro <- post_sst_p +
+  annotation_custom(ggplotGrob(post_sst_p_zoom),
+                    xmin = 15, xmax = 23,
+                    ymin = 0.1, ymax = 0.9)+
+  theme(axis.title = element_blank())
+embeded_sst_pro
+```
+
+####Bind
+```{r}
+x_title_year <- textGrob("Year", gp = gpar(fontsize = 12))
+x_title_sst <- textGrob("SST-temporal (°C)", gp = gpar(fontsize = 12))
+l_col_title_pre <- textGrob("Pre-establishment", gp = gpar(fontsize = 12))
+r_col_title_pre <- textGrob("Post-establishment", gp = gpar(fontsize = 12))
+
+
+grid_pre_post_yr_sst=gridExtra::grid.arrange(
+  left="Occurrence probability",
+  l_col_title_pre,r_col_title_pre,
+  pre_yr_p,post_yr_p,x_title_year,
+  embeded_sst_pre,embeded_sst_pro,x_title_sst,
+  layout_matrix = rbind(
+    c(1, 2),
+    c(3, 4),
+    c(3, 4),
+    c(3, 4),
+    c(3, 4),
+    c(3, 4),
+    c(3, 4),
+    c(3, 4),
+    c(3, 4),
+    c(3, 4),
+    c(3, 4),# Top plots
+    c(5, 5), # Title for top plots (spanning two columns)
+    c(6, 7),
+    c(6, 7),
+    c(6, 7),
+    c(6, 7),
+    c(6, 7),
+    c(6, 7),
+    c(6, 7),
+    c(6, 7),
+    c(6, 7),
+    c(6, 7),
+    c(8,8)))
+
+
+ggsave(filename ="grid_pre_post_yr_sst.png" ,plot =grid_pre_post_yr_sst ,device = "jpeg",units = "cm",width = 20,height = 15)
 ```
 
