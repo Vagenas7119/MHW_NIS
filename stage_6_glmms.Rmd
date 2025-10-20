@@ -28,7 +28,6 @@ data_models_pre_scaled=data_models %>%
     year_of_mhws_sc = scale(year_of_mhws)[, 1],
     median_sst_sc = scale(median_sst)[, 1],
     long_max_s_sst_sc=scale(long_max_s_sst)[,1])
-  
 ```
 
 #1) Modeling
@@ -392,7 +391,7 @@ test_main_r_part=glmmTMB(
     annual_c_int_sc+
     year_of_mhws_sc+
     median_sst_sc+
-    max_s_sst_sc+
+    long_max_s_sst_sc+
     (1|h3_id)+
     (1|species),
   family = "binomial")
@@ -513,7 +512,7 @@ cleaned_table2 <- as.data.frame(cleaned_table) %>%
 write.csv(cleaned_table2,"cleaned_table.csv",row.names = F)
 
 
-simportance_ranking <- MuMIn::sw(model_selection_table)
+importance_ranking <- MuMIn::sw(model_selection_table)
 importance_ranking
 sw_df_long <- data.frame(
   Predictor = names(importance_ranking),
@@ -525,15 +524,488 @@ sw_df_long <- data.frame(
                              Predictor%in%"cond(scale(median_sst))"~"SST - spatiotemporal",
                              Predictor%in%"cond(scale(CPI))"~"CPI",
                              Predictor%in%"cond(scale(annual_c_int))"~"Cumulative intensity",
-                             Predictor%in%"cond(scale(max_s_sst))"~"SST - spatial"))
+                             Predictor%in%"cond(scale(long_max_s_sst))"~"SST - spatial"),
+         SW=SW %>% round(digits = 3))
 
 write.csv(sw_df_long,"sw_df_long.csv")
 # Reset global options
 options(na.action = "na.omit")
 ```
 
-#4) Sensetivity
-Modelling the effects only for species that first 
+#4) Phase analyses
+Georgos ran the model - estimate variance partition
+
+Data preparation
+```{r}
+#########################
+#all species after 1987##
+#########################
+data_1987=data_models %>% 
+  ungroup() %>% 
+  #remove species that entered before 1987
+  filter(first_rec_year>1987) %>% 
+  mutate(time_series_id=paste(h3_id,species))
+
+#Now get rid of rows representing species with zero sum of records
+check_zeros_data_1987=data_1987 %>% 
+  group_by(h3_id,species) %>% 
+  summarise(n=(sum(records))) %>% 
+  filter(n>0)
+
+#applay cleaning on the data
+data_1987=data_1987 %>% 
+  inner_join(check_zeros_data_1987 %>% select(-n),
+             by=c("h3_id","species")) %>% 
+  ungroup()
+#make sure it is cleaned
+data_1987 %>% 
+  group_by(h3_id,species) %>% 
+  summarise(n=(sum(records))) %>% 
+  select(n) %>% 
+  pull %>% 
+  range
+data_1987$species %>% n_distinct()
+data_1987$h3_id %>% n_distinct()
+data_1987 %>% nrow()
+##How many dis rec per sp?
+data_1987 %>% 
+  group_by(species) %>% 
+  summarise(sum_rec=sum(records)) %>% 
+  view
+
+# --- Step 1: Calculate the Species-Wide Occurrence Rank and the Time Series Rank ---
+data_events_grouped <- data_1987 %>%
+  # Create the chronological rank of the '1' record across ALL hexagons for the species
+  group_by(species) %>%
+  arrange(year_of_records) %>%
+  # This column only has a value > 0 on the '1' record for each time series
+  mutate(species_occurrence_number = cumsum(records)) %>%
+  ungroup() %>%
+# Determine the single rank for the entire time series
+  group_by(time_series_id) %>%
+  # The maximum value of the previous column is the final rank of the '1' for this time series
+  mutate(max_occurrence_rank = max(species_occurrence_number)) %>%
+  ungroup()
+
+###################
+#Pre-establishment#
+###################
+
+#filter the right time series based on the species above
+pre_est_data=data_events_grouped %>%
+  # Filter to keep ALL rows (0s and 1s) from time series whose rank is 1, 2, or 3
+  filter(max_occurrence_rank >= 1 & max_occurrence_rank <= 3)
+
+pre_est_data$species %>% n_distinct()
+pre_est_data$h3_id %>% n_distinct()
+pre_est_data %>% nrow()
+
+pre_est_data %>% 
+  group_by(time_series_id) %>% 
+  summarise(sum_r=sum(records)) %>% 
+  pull(sum_r) %>% range
+
+####################
+#Post-establishment#
+####################
+#Find time series representing the first til third record in the med.
+post_est_data=data_events_grouped %>%
+  # Filter to keep ALL rows (0s and 1s) from time series whose rank is 4 or greater
+  filter(max_occurrence_rank >= 4)
+
+post_est_data$species %>% n_distinct()
+post_est_data$h3_id %>% n_distinct()
+post_est_data %>% nrow()
+
+post_est_species %>% 
+  group_by(time_series_id) %>% 
+  summarise(sum_r=sum(records)) %>% 
+  pull(sum_r) %>% range
+```
+
+##4.1) Only species with first records after 1987
+```{r}
+all_after_1987=glmmTMB(
+  data = data_1987,
+  formula = records~
+    scale(first_rec_year)+
+    scale(CPI)+
+    scale(sources)+
+    scale(annual_c_int)+
+    scale(year_of_mhws)+
+    scale(median_sst)+
+    scale(long_max_s_sst)+
+    (1|h3_id)+
+    (1|species),
+  family = "binomial",
+  control = glmmTMBControl(optimizer = optim,
+                           optArgs = list(method = "BFGS",
+                                          maxit = 10000)))
+
+summary(all_after_1987)
+performance::check_singularity(all_after_1987)
+performance::check_convergence(all_after_1987)
+performance::check_overdispersion(all_after_1987)
+performance::check_collinearity(all_after_1987)
+plot(DHARMa::simulateResiduals(all_after_1987))
+MuMIn::r.squaredGLMM(all_after_1987)
+
+#Summarise table for the model
+fixed_effects_df_after_1987 <- broom.mixed::tidy(all_after_1987, effects = "fixed") %>%
+  # Select and rename columns to match the request
+  select(
+    Variable = term,
+    Coefficient = estimate,
+    `Std. Error` = std.error,
+    `Z Value` = statistic,
+    `P Value` = p.value
+  ) %>%
+  # Format numeric columns for clean presentation (e.g., 3 decimal places)
+  mutate(
+    Coefficient = round(Coefficient, 3),
+    `Std. Error` = round(`Std. Error`, 3),
+    `Z Value` = round(`Z Value`, 2),
+    `P Value` = format.pval(`P Value`, digits = 3, eps = 0.0001)
+  )
+#random effects
+random_effects_df <- broom.mixed::tidy(all_after_1987, effects = "ran_pars") 
+
+#write.csv(fixed_effects_df_after_1987,"fixed_effects_df_after_1987_binomial.csv",row.names = F)
+```
+
+###4.1.1) R partition
+```{r}
+#Rename for glmm.ho func
+data_1987_scaled=data_1987 %>% 
+  mutate(
+    first_rec_year_sc = scale(first_rec_year)[, 1],
+    CPI_sc = scale(CPI)[, 1],
+    sources_sc = scale(sources)[, 1],
+    annual_c_int_sc = scale(annual_c_int)[, 1],
+    year_of_mhws_sc = scale(year_of_mhws)[, 1],
+    median_sst_sc = scale(median_sst)[, 1],
+    long_max_s_sst_sc=scale(long_max_s_sst)[,1])
+
+#model
+all_after_1987_sc=glmmTMB(
+  data = data_1987_scaled,
+  formula = records~
+    first_rec_year_sc+
+    CPI_sc+
+    sources_sc+
+    annual_c_int_sc+
+    year_of_mhws_sc+
+    median_sst_sc+
+    long_max_s_sst_sc+
+    (1|h3_id)+
+    (1|species),
+  family = "binomial")
+
+R2_partition_results_after_1987 <-glmm.hp(all_after_1987_sc,
+                                #iv =iv,
+                                type="R2") # Specify that I want adjusted R2 partitioning
+
+R2_partition_results_after_1987
+write_rds(R2_partition_results_after_1987,"R2_partition_results_after_1987_test_main.rds")
+
+#Interpretation
+##Unique - The R2 explained by the predictor alone, i.e., in a model containing only that predictor.
+
+##Average.share - The R2 explained by the predictor jointly with other predictors, calculated as the average improvement in R2 across all possible models where that predictor is added. This is the primary metric for individual predictor importance.
+
+##Individual - The total contribution of the predictor to the model Rm. This is the sum of its Unique contribution and its Average.share contribution: Unique+Average.share.
+
+##I.perc(%)	- The percentage contribution of the predictor to the total Rm. Calculated as:
+#Individual/Rm2 ×100%.
+
+
+############UPDATE
+#Save as csv
+R2_partition_results_after_1987_df=R2_partition_results_after_1987[[2]] %>% 
+  as_data_frame() %>% 
+  rownames_to_column() %>% 
+  rename(predictors=1,
+         Unique =2,
+         Average.share=3,
+         Individual=4,
+         `I.perc(%)`=5) %>% 
+  mutate(predictors=case_when(predictors%in%"1"~"Year of first record",
+                              predictors%in%"2"~"CPI",
+                              predictors%in%"3"~"Sources",
+                              predictors%in%"4"~"Cumulative intensity",
+                              predictors%in%"5"~"Year",
+                              predictors%in%"6"~"SST - spatiotemporal",
+                              predictors%in%"7"~"SST - spatial")) %>% 
+  # 👇 ADD THIS PART TO SUM DOWN THE COLUMNS AND ADD A NEW ROW
+  bind_rows(
+    summarise(., 
+      predictors = "", # Set the predictor name to an empty string (" ")
+      across(
+        .cols = c(Unique, Average.share, Individual, `I.perc(%)`), # Specify the columns to sum
+        .fns = ~sum(., na.rm = TRUE) # Apply the sum function
+      )
+    )
+  )
+  
+write.csv(R2_partition_results_after_1987_df,"R2_partition_results_after_1987_df_test_main.csv",row.names = F)
+```
+
+##4.2) Pre-establishment
+```{r}
+pre_est_test=glmmTMB(
+  data = pre_est_data,
+  formula = records~
+    scale(first_rec_year)+
+    scale(CPI)+
+    scale(sources)+
+    scale(annual_c_int)+
+    scale(year_of_mhws)+
+    scale(median_sst)+
+    scale(long_max_s_sst)+
+    (1|h3_id)+
+    (1|species),
+  family = "binomial",
+  control = glmmTMBControl(optimizer = optim,
+                           optArgs = list(method = "BFGS",
+                                          maxit = 10000)))
+
+summary(pre_est_test)
+performance::check_singularity(pre_est_test)
+performance::check_convergence(pre_est_test)
+performance::check_overdispersion(pre_est_test)
+performance::check_collinearity(pre_est_test)
+plot(DHARMa::simulateResiduals(pre_est_test))
+MuMIn::r.squaredGLMM(pre_est_test)
+
+#Summarise table for the model
+fixed_effects_df_pre_est_test <- broom.mixed::tidy(pre_est_test, effects = "fixed") %>%
+  # Select and rename columns to match the request
+  select(
+    Variable = term,
+    Coefficient = estimate,
+    `Std. Error` = std.error,
+    `Z Value` = statistic,
+    `P Value` = p.value
+  ) %>%
+  # Format numeric columns for clean presentation (e.g., 3 decimal places)
+  mutate(
+    Coefficient = round(Coefficient, 3),
+    `Std. Error` = round(`Std. Error`, 3),
+    `Z Value` = round(`Z Value`, 2),
+    `P Value` = format.pval(`P Value`, digits = 3, eps = 0.0001)
+  )
+#random effects
+pre_est_test_random_effects_df <- broom.mixed::tidy(pre_est_test, effects = "ran_pars") 
+
+#write.csv(fixed_effects_df_pre_est_test,"fixed_effects_df_pre_est_test.csv",row.names = F)
+```
+
+###4.2.1) R partition
+```{r}
+#Rename for glmm.ho func
+pre_est_data_scaled=pre_est_data %>% 
+  mutate(
+    first_rec_year_sc = scale(first_rec_year)[, 1],
+    CPI_sc = scale(CPI)[, 1],
+    sources_sc = scale(sources)[, 1],
+    annual_c_int_sc = scale(annual_c_int)[, 1],
+    year_of_mhws_sc = scale(year_of_mhws)[, 1],
+    median_sst_sc = scale(median_sst)[, 1],
+    long_max_s_sst_sc=scale(long_max_s_sst)[,1])
+
+#model
+pre_est_sc=glmmTMB(
+  data = pre_est_data_scaled,
+  formula = records~
+    first_rec_year_sc+
+    CPI_sc+
+    sources_sc+
+    annual_c_int_sc+
+    year_of_mhws_sc+
+    median_sst_sc+
+    long_max_s_sst_sc+
+    (1|h3_id)+
+    (1|species),
+  family = "binomial")
+
+R2_partition_results_pre_est_sc <-glmm.hp(pre_est_sc,
+                                #iv =iv,
+                                type="R2") # Specify that I want adjusted R2 partitioning
+
+R2_partition_results_pre_est_sc
+write_rds(R2_partition_results_pre_est_sc,"R2_partition_results_pre_est_sc.rds")
+
+#Interpretation
+##Unique - The R2 explained by the predictor alone, i.e., in a model containing only that predictor.
+
+##Average.share - The R2 explained by the predictor jointly with other predictors, calculated as the average improvement in R2 across all possible models where that predictor is added. This is the primary metric for individual predictor importance.
+
+##Individual - The total contribution of the predictor to the model Rm. This is the sum of its Unique contribution and its Average.share contribution: Unique+Average.share.
+
+##I.perc(%)	- The percentage contribution of the predictor to the total Rm. Calculated as:
+#Individual/Rm2 ×100%.
+
+
+############UPDATE
+#Save as csv
+R2_partition_results_pre_est_sc_df=R2_partition_results_pre_est_sc[[2]] %>% 
+  as_data_frame() %>% 
+  rownames_to_column() %>% 
+  rename(predictors=1,
+         Unique =2,
+         Average.share=3,
+         Individual=4,
+         `I.perc(%)`=5) %>% 
+  mutate(predictors=case_when(predictors%in%"1"~"Year of first record",
+                              predictors%in%"2"~"CPI",
+                              predictors%in%"3"~"Sources",
+                              predictors%in%"4"~"Cumulative intensity",
+                              predictors%in%"5"~"Year",
+                              predictors%in%"6"~"SST - spatiotemporal",
+                              predictors%in%"7"~"SST - spatial")) %>% 
+  # 👇 ADD THIS PART TO SUM DOWN THE COLUMNS AND ADD A NEW ROW
+  bind_rows(
+    summarise(., 
+      predictors = "", # Set the predictor name to an empty string (" ")
+      across(
+        .cols = c(Unique, Average.share, Individual, `I.perc(%)`), # Specify the columns to sum
+        .fns = ~sum(., na.rm = TRUE) # Apply the sum function
+      )
+    )
+  )
+  
+write.csv(R2_partition_results_pre_est_sc_df,"R2_partition_results_pre_est_sc_df.csv",row.names = F)
+```
+
+##4.3) Post-establishment
+```{r}
+post_est_test=glmmTMB(
+  data = post_est_data,
+  formula = records~
+    scale(first_rec_year)+
+    scale(CPI)+
+    scale(sources)+
+    scale(annual_c_int)+
+    scale(year_of_mhws)+
+    scale(median_sst)+
+    scale(long_max_s_sst)+
+    (1|h3_id)+
+    (1|species),
+  family = "binomial",
+  control = glmmTMBControl(optimizer = optim,
+                           optArgs = list(method = "BFGS",
+                                          maxit = 10000)))
+
+summary(post_est_test)
+performance::check_singularity(post_est_test)
+performance::check_convergence(post_est_test)
+performance::check_overdispersion(post_est_test)
+performance::check_collinearity(post_est_test)
+plot(DHARMa::simulateResiduals(post_est_test))
+MuMIn::r.squaredGLMM(post_est_test)
+
+#Summarise table for the model
+fixed_effects_df_post_est_test <- broom.mixed::tidy(post_est_test, effects = "fixed") %>%
+  # Select and rename columns to match the request
+  select(
+    Variable = term,
+    Coefficient = estimate,
+    `Std. Error` = std.error,
+    `Z Value` = statistic,
+    `P Value` = p.value
+  ) %>%
+  # Format numeric columns for clean presentation (e.g., 3 decimal places)
+  mutate(
+    Coefficient = round(Coefficient, 3),
+    `Std. Error` = round(`Std. Error`, 3),
+    `Z Value` = round(`Z Value`, 2),
+    `P Value` = format.pval(`P Value`, digits = 3, eps = 0.0001)
+  )
+#random effects
+post_est_test_random_effects_df <- broom.mixed::tidy(post_est_test, effects = "ran_pars") 
+
+#write.csv(fixed_effects_df_post_est_test,"fixed_effects_df_post_est_test.csv",row.names = F)
+```
+
+###4.3.1) R partition
+```{r}
+#Rename for glmm.ho func
+post_est_data_scaled=post_est_data %>% 
+  mutate(
+    first_rec_year_sc = scale(first_rec_year)[, 1],
+    CPI_sc = scale(CPI)[, 1],
+    sources_sc = scale(sources)[, 1],
+    annual_c_int_sc = scale(annual_c_int)[, 1],
+    year_of_mhws_sc = scale(year_of_mhws)[, 1],
+    median_sst_sc = scale(median_sst)[, 1],
+    long_max_s_sst_sc=scale(long_max_s_sst)[,1])
+
+#model
+post_est_sc=glmmTMB(
+  data = post_est_data_scaled,
+  formula = records~
+    first_rec_year_sc+
+    CPI_sc+
+    sources_sc+
+    annual_c_int_sc+
+    year_of_mhws_sc+
+    median_sst_sc+
+    long_max_s_sst_sc+
+    (1|h3_id)+
+    (1|species),
+  family = "binomial")
+
+R2_partition_results_post_est_sc <-glmm.hp(post_est_sc,
+                                #iv =iv,
+                                type="R2") # Specify that I want adjusted R2 partitioning
+
+R2_partition_results_post_est_sc
+write_rds(R2_partition_results_post_est_sc,"R2_partition_results_post_est_sc.rds")
+
+#Interpretation
+##Unique - The R2 explained by the predictor alone, i.e., in a model containing only that predictor.
+
+##Average.share - The R2 explained by the predictor jointly with other predictors, calculated as the average improvement in R2 across all possible models where that predictor is added. This is the primary metric for individual predictor importance.
+
+##Individual - The total contribution of the predictor to the model Rm. This is the sum of its Unique contribution and its Average.share contribution: Unique+Average.share.
+
+##I.perc(%)	- The percentage contribution of the predictor to the total Rm. Calculated as:
+#Individual/Rm2 ×100%.
+
+
+############UPDATE
+#Save as csv
+R2_partition_results_post_est_sc_df=R2_partition_results_post_est_sc[[2]] %>% 
+  as_data_frame() %>% 
+  rownames_to_column() %>% 
+  rename(predictors=1,
+         Unique =2,
+         Average.share=3,
+         Individual=4,
+         `I.perc(%)`=5) %>% 
+  mutate(predictors=case_when(predictors%in%"1"~"Year of first record",
+                              predictors%in%"2"~"CPI",
+                              predictors%in%"3"~"Sources",
+                              predictors%in%"4"~"Cumulative intensity",
+                              predictors%in%"5"~"Year",
+                              predictors%in%"6"~"SST - spatiotemporal",
+                              predictors%in%"7"~"SST - spatial")) %>% 
+  # 👇 ADD THIS PART TO SUM DOWN THE COLUMNS AND ADD A NEW ROW
+  bind_rows(
+    summarise(., 
+      predictors = "", # Set the predictor name to an empty string (" ")
+      across(
+        .cols = c(Unique, Average.share, Individual, `I.perc(%)`), # Specify the columns to sum
+        .fns = ~sum(., na.rm = TRUE) # Apply the sum function
+      )
+    )
+  )
+  
+write.csv(R2_partition_results_post_est_sc_df,"R2_partition_results_post_est_sc_df.csv",row.names = F)
+```
+
+
+#5) Plot all models
 ```{r}
 
 ```
