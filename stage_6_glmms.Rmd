@@ -17,7 +17,8 @@ library(glmm.hp)
 #Data
 ```{r}
 #data for models
-data_models=read_rds("record_data_for_glmms.rds")
+data_models=read_rds("record_data_for_glmms.rds") %>% 
+  mutate(time_series_id=paste(h3_id,species))
 #for compatibility with variance partition
 data_models_pre_scaled=data_models %>% 
   mutate(
@@ -28,6 +29,10 @@ data_models_pre_scaled=data_models %>%
     year_of_mhws_sc = scale(year_of_mhws)[, 1],
     median_sst_sc = scale(median_sst)[, 1],
     long_max_s_sst_sc=scale(long_max_s_sst)[,1])
+
+data_models$time_series_id %>% n_distinct(
+  
+)
 ```
 
 #1) Modeling
